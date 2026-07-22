@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>ADUANAS HERO</title>
+  <link rel="stylesheet" href="./src/ui/style.css" />
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- Pantalla de título: el clic desbloquea el AudioContext -->
+  <div id="title-screen">
+    <div class="title-inner">
+      <div class="title-badge">DIRECCIÓN DE ADUANAS · TURNO NOCHE</div>
+      <h1>ADUANAS<br /><span>HERO</span></h1>
+      <p class="title-sub">Llevas la placa. Todos te mienten.<br />Y si te equivocas, alguien paga las consecuencias.</p>
+      <button id="btn-start">INICIAR TURNO</button>
+      <p class="title-hint">Auriculares recomendados · 16+</p>
+    </div>
+  </div>
+
+  <div id="hud-root"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

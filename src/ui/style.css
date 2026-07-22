@@ -1,0 +1,306 @@
+/* ADUANAS HERO — UI diegética institucional.
+   Paleta fría con acentos de alerta (Visión §20): la UI parece papelería y
+   monitores de aduana, no un videojuego. */
+
+:root {
+  --ink: #dfe6ee;
+  --ink-dim: #8a95a3;
+  --panel: rgba(10, 14, 20, 0.88);
+  --panel-line: #2a3442;
+  --accent: #d08a1d;
+  --alert: #c22b2b;
+  --ok: #2e9e4f;
+  --blue: #2b5fb8;
+  --mono: 'Consolas', 'Courier New', monospace;
+  --serif: Georgia, 'Times New Roman', serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: #05070b; color: var(--ink);
+  font-family: var(--mono); font-size: 14px;
+  user-select: none;
+}
+
+#gl { position: fixed; inset: 0; display: block; }
+
+/* ── Pantalla de título ─────────────────────────────────────────────── */
+#title-screen {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(30, 44, 66, 0.55), transparent 60%),
+    linear-gradient(#05070b, #090d14);
+  transition: opacity 1.6s ease;
+}
+#title-screen.hidden { opacity: 0; pointer-events: none; }
+.title-inner { text-align: center; max-width: 560px; padding: 24px; }
+.title-badge {
+  display: inline-block; padding: 6px 14px; margin-bottom: 26px;
+  border: 1px solid var(--panel-line); color: var(--ink-dim);
+  letter-spacing: 3px; font-size: 11px;
+}
+#title-screen h1 {
+  font-family: var(--serif); font-size: 72px; line-height: 0.95;
+  letter-spacing: 10px; color: #eef3f9; text-shadow: 0 0 40px rgba(80, 130, 200, 0.35);
+}
+#title-screen h1 span { color: var(--accent); }
+.title-sub { margin: 26px 0 34px; color: var(--ink-dim); line-height: 1.7; font-size: 13px; }
+#btn-start {
+  font-family: var(--mono); font-size: 16px; letter-spacing: 4px;
+  padding: 14px 42px; cursor: pointer;
+  color: var(--ink); background: transparent; border: 1px solid var(--accent);
+  transition: background 0.3s, color 0.3s;
+}
+#btn-start:hover { background: var(--accent); color: #10131a; }
+.title-hint { margin-top: 22px; font-size: 11px; color: #4a5460; letter-spacing: 2px; }
+
+/* ── Estructura del HUD ─────────────────────────────────────────────── */
+#hud-root { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#hud-root > * { pointer-events: auto; }
+
+.topbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 18px; font-size: 11px; letter-spacing: 2px; color: var(--ink-dim);
+  background: linear-gradient(rgba(5, 8, 12, 0.85), transparent);
+}
+.topbar .alerta { color: var(--accent); }
+.topbar .rep { color: var(--ink); }
+.tb-derecha { display: flex; align-items: center; gap: 12px; }
+#btn-voz {
+  background: none; border: 1px solid var(--panel-line); color: var(--ink);
+  font-size: 13px; padding: 3px 8px; cursor: pointer;
+}
+#btn-voz.apagado { opacity: 0.4; }
+
+/* ── Cinta de diálogo ───────────────────────────────────────────────── */
+.dialogo {
+  position: absolute; left: 50%; bottom: 21%; transform: translateX(-50%);
+  max-width: 620px; min-width: 320px; padding: 14px 20px;
+  background: var(--panel); border-left: 3px solid var(--panel-line);
+  font-family: var(--serif); font-size: 16px; line-height: 1.55; font-style: italic;
+  color: #e8edf4; opacity: 0; transition: opacity 0.35s;
+}
+.dialogo.visible { opacity: 1; }
+.dialogo .hablante {
+  font-family: var(--mono); font-style: normal; font-size: 10px;
+  letter-spacing: 2px; color: var(--ink-dim); margin-bottom: 6px;
+}
+
+/* ── Dock de herramientas ───────────────────────────────────────────── */
+.dock {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 8px; padding: 14px 12px 18px;
+  background: linear-gradient(transparent, rgba(5, 8, 12, 0.92) 45%);
+}
+.dock button, .panel button {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 1.5px;
+  padding: 11px 16px; cursor: pointer;
+  background: rgba(18, 24, 33, 0.95); color: var(--ink);
+  border: 1px solid var(--panel-line);
+  transition: border-color 0.2s, background 0.2s, transform 0.1s;
+}
+.dock button:hover, .panel button:hover { border-color: var(--accent); background: rgba(30, 38, 50, 0.95); }
+.dock button:active, .panel button:active { transform: translateY(1px); }
+.dock button.primary { border-color: var(--accent); color: var(--accent); }
+.dock button.peligro { border-color: var(--alert); color: #e2665f; }
+.dock button:disabled { opacity: 0.35; cursor: default; }
+
+/* ── Paneles laterales / centrales ──────────────────────────────────── */
+.panel {
+  position: absolute; background: var(--panel);
+  border: 1px solid var(--panel-line); padding: 16px;
+}
+.panel h3 {
+  font-size: 11px; letter-spacing: 3px; color: var(--ink-dim);
+  border-bottom: 1px solid var(--panel-line); padding-bottom: 8px; margin-bottom: 10px;
+}
+
+/* Expediente (persistente a la derecha) */
+#expediente {
+  top: 52px; right: 14px; width: 285px; max-height: 55vh; overflow-y: auto;
+}
+#expediente .señal {
+  padding: 8px 10px; margin-bottom: 6px; font-size: 12px; line-height: 1.45;
+  background: rgba(208, 138, 29, 0.09); border-left: 2px solid var(--accent);
+  animation: señal-in 0.4s ease;
+}
+#expediente .vacio { color: #4a5460; font-size: 12px; font-style: italic; }
+@keyframes señal-in { from { transform: translateX(16px); opacity: 0; } }
+
+/* Ficha del pasajero */
+#ficha { top: 52px; left: 14px; width: 300px; }
+#ficha .nombre { font-family: var(--serif); font-size: 19px; color: #eef3f9; }
+#ficha .meta { color: var(--ink-dim); font-size: 11px; margin: 4px 0 10px; line-height: 1.5; }
+#ficha .obs { font-size: 12px; line-height: 1.55; color: #c6cedb; font-style: italic; }
+
+/* Interrogatorio: la libreta del oficial (papel, no cajones) */
+#interrogatorio {
+  bottom: 24px; left: 18px; width: 380px; max-width: 94vw;
+  background: linear-gradient(172deg, #e6dfc9, #d6cbae);
+  border: none; border-left: 14px solid #8a2c2c; /* el lomo de la libreta */
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  color: #2c2618; padding: 14px 18px 12px;
+  transform: rotate(-0.5deg);
+}
+.libreta-titulo {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: #7a6a45;
+  border-bottom: 2px solid #b5a87f; padding-bottom: 6px; margin-bottom: 8px;
+}
+#interrogatorio .temas { display: flex; flex-direction: column; margin-bottom: 10px; }
+#interrogatorio button.tema {
+  background: none; border: none; text-align: left; cursor: pointer;
+  font-family: var(--serif); font-style: italic; font-size: 16px; color: #3a3020;
+  padding: 5px 4px; border-bottom: 1px dashed rgba(122, 106, 69, 0.4);
+  transition: background 0.15s, padding-left 0.15s;
+}
+#interrogatorio button.tema:hover { background: rgba(190, 140, 30, 0.16); padding-left: 12px; }
+#interrogatorio button.tema:disabled { opacity: 0.35; cursor: default; }
+#interrogatorio .tacticas { display: flex; gap: 8px; margin-bottom: 8px; }
+#interrogatorio button.tactica {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: rgba(44, 38, 24, 0.06); border: 1px solid #b5a87f; color: #2c2618;
+  padding: 8px 4px; cursor: pointer; transition: background 0.15s, transform 0.1s;
+}
+#interrogatorio button.tactica b { font-size: 17px; font-weight: normal; }
+#interrogatorio button.tactica span { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; }
+#interrogatorio button.tactica:hover { background: rgba(190, 140, 30, 0.2); }
+#interrogatorio button.tactica:active { transform: translateY(1px); }
+#interrogatorio button.confrontar { border-color: #a31f27; color: #a31f27; }
+.libreta-pista { font-size: 11px; color: #7a6a45; font-style: italic; margin: 4px 0 6px; line-height: 1.5; }
+#interrogatorio button.volver {
+  background: #2c2618; color: #e6dfc9; border: none; font-family: var(--mono);
+  font-size: 10px; letter-spacing: 2px; padding: 8px 14px; cursor: pointer; margin-top: 4px;
+}
+#interrogatorio .chip-tell { color: #8a5a10; border-color: #8a5a10; }
+.chip-tell {
+  display: inline-block; margin-top: 8px; padding: 8px 14px; cursor: pointer;
+  border: 1px dashed var(--accent); color: var(--accent); font-size: 11px; letter-spacing: 1px;
+  animation: chip-pulse 1.2s infinite;
+}
+@keyframes chip-pulse { 50% { background: rgba(208, 138, 29, 0.12); } }
+
+/* Documentos */
+#documentos {
+  /* A la derecha: el lado izquierdo del tablero es del pasaporte 3D arrastrable. */
+  bottom: 84px; right: 26px;
+  width: 372px; max-width: 46vw; max-height: 62vh; overflow-y: auto;
+  display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+  background: transparent; border: none;
+}
+#documentos .doc { width: 330px; }
+.doc {
+  width: 320px; padding: 18px 20px 22px;
+  background: linear-gradient(175deg, #ece5d2, #ddd3ba);
+  color: #2c2618; font-family: var(--serif);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(255, 255, 255, 0.25) inset;
+  transform: rotate(-0.6deg);
+}
+.doc:nth-child(2) { transform: rotate(0.8deg); }
+.doc:nth-child(3) { transform: rotate(-1.1deg); }
+.doc h4 {
+  font-size: 13px; letter-spacing: 2px; border-bottom: 2px solid #7a6a45;
+  padding-bottom: 6px; margin-bottom: 10px;
+}
+.doc .linea { padding: 6px 4px; font-size: 14px; line-height: 1.45; }
+.doc .linea.señalable { cursor: pointer; border-bottom: 1px dashed #a08b56; }
+.doc .linea.señalable:hover { background: rgba(190, 140, 30, 0.18); }
+.doc .linea.registrada { background: rgba(163, 31, 39, 0.14); text-decoration: none; border-bottom: 2px solid #a31f27; }
+
+/* Rayos X */
+#xray-controls {
+  bottom: 88px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; background: transparent; border: none;
+}
+#xray-label {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+  padding: 10px 18px; background: var(--panel); border-left: 3px solid var(--blue);
+  font-size: 12px; letter-spacing: 1px; max-width: 560px; text-align: center;
+}
+
+/* Escáner corporal (siluetas, §28) */
+#corporal {
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 340px; text-align: center;
+}
+#corporal svg { width: 190px; margin: 12px auto; display: block; }
+#corporal .zona-anomala { cursor: pointer; animation: chip-pulse 1s infinite; }
+
+/* Decisión */
+#decision { bottom: 88px; left: 50%; transform: translateX(-50%); text-align: center; background: transparent; border: none; }
+#decision .sellos { display: flex; gap: 10px; justify-content: center; }
+#decision button {
+  font-size: 14px; letter-spacing: 2px; padding: 16px 22px; font-weight: bold;
+}
+#decision .PASE { border-color: var(--ok); color: #58c97e; }
+#decision .COBRO { border-color: var(--accent); color: #e0a23f; }
+#decision .RETENIDO { border-color: var(--alert); color: #e2665f; }
+#decision .DERIVADO { border-color: var(--blue); color: #6f9be0; }
+#decision .aviso { margin-top: 10px; font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; }
+
+/* ── Consecuencia: letterbox de cine ────────────────────────────────── */
+#consecuencia { position: absolute; inset: 0; pointer-events: none; }
+#consecuencia .barra { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height 0.9s cubic-bezier(0.7, 0, 0.3, 1); }
+#consecuencia .barra.top { top: 0; }
+#consecuencia .barra.bottom { bottom: 0; }
+#consecuencia.activa .barra { height: 13vh; }
+#consecuencia .texto {
+  position: absolute; bottom: 15vh; left: 50%; transform: translateX(-50%);
+  max-width: 700px; text-align: center; font-family: var(--serif); font-size: 18px;
+  line-height: 1.6; color: #e8edf4; opacity: 0; transition: opacity 1s ease 0.6s;
+  text-shadow: 0 2px 12px #000;
+}
+#consecuencia.activa .texto { opacity: 1; }
+#consecuencia .continuar {
+  position: absolute; bottom: 4vh; left: 50%; transform: translateX(-50%);
+  pointer-events: auto; opacity: 0; transition: opacity 0.5s ease 1.8s;
+  font-family: var(--mono); font-size: 12px; letter-spacing: 3px;
+  padding: 11px 28px; cursor: pointer;
+  background: rgba(18, 24, 33, 0.95); color: var(--ink);
+  border: 1px solid var(--panel-line);
+}
+#consecuencia .continuar:hover { border-color: var(--accent); }
+#consecuencia.activa .continuar { opacity: 1; }
+
+/* ── Briefing y Hoja de Servicio ────────────────────────────────────── */
+.sheet {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 620px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+  background: linear-gradient(175deg, #ece5d2, #ddd3ba); color: #2c2618;
+  font-family: var(--serif); padding: 30px 34px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+.sheet h2 { font-size: 20px; letter-spacing: 3px; border-bottom: 3px double #7a6a45; padding-bottom: 10px; margin-bottom: 16px; }
+.sheet .fila-resultado { padding: 10px 0; border-bottom: 1px solid #b5a87f; font-size: 14px; line-height: 1.5; }
+.sheet .fila-resultado .calidad { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; }
+.sheet .calidad.solida, .sheet .calidad.aceptable { color: #1e6e3a; }
+.sheet .calidad.correcto, .sheet .calidad.corazonada { color: #8a6a10; }
+.sheet .calidad.fallo, .sheet .calidad.parcial { color: #a31f27; }
+.sheet .perdida { font-size: 12px; color: #a31f27; font-style: italic; margin-top: 3px; }
+.sheet .noticia {
+  margin: 18px 0; padding: 14px; background: rgba(163, 31, 39, 0.08);
+  border-left: 3px solid #a31f27; font-style: italic; font-size: 14px; line-height: 1.6;
+}
+.sheet .firma { display: block; margin: 22px auto 0; font-family: var(--mono); }
+.sheet button {
+  font-family: var(--mono); letter-spacing: 2px; font-size: 13px;
+  padding: 12px 26px; cursor: pointer; background: #2c2618; color: #ece5d2;
+  border: none;
+}
+.sheet button:hover { background: #4a3f28; }
+.sheet .brief-body { font-size: 15px; line-height: 1.7; }
+
+/* Aviso flotante (Justus, abusos, sistema) */
+.toast {
+  position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+  padding: 12px 22px; background: var(--panel); border-left: 3px solid var(--blue);
+  font-size: 13px; letter-spacing: 1px; opacity: 0; transition: opacity 0.3s;
+  max-width: 520px; text-align: center; line-height: 1.5;
+}
+.toast.visible { opacity: 1; }
+.toast.alerta { border-left-color: var(--alert); }
+
+.oculto { display: none !important; }
