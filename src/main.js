@@ -9,6 +9,4 @@ import { SceneManager } from './core/SceneManager.js';
 const manager = new SceneManager();
 manager.showMenu();
 
-if (import.meta.env?.DEV) {
-  window.__AH_MANAGER = manager;
-}
+window.__AH_MANAGER = manager; // gancho de depuración (inofensivo en prod)

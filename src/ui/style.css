@@ -22,9 +22,17 @@ html, body {
   background: #05070b; color: var(--ink);
   font-family: var(--mono); font-size: 14px;
   user-select: none;
+  -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none; /* nada de "pull to refresh" a media partida */
 }
 
-#gl { position: fixed; inset: 0; display: block; }
+/* El lienzo NUNCA hace scroll ni zoom: todo arrastre es del juego. */
+#gl { position: fixed; inset: 0; display: block; touch-action: none; }
+
+/* Objetivos táctiles: cualquier botón del juego cumple el mínimo de 48 px. */
+@media (pointer: coarse) {
+  button { min-height: 48px; }
+}
 
 /* ── Pantalla de título ─────────────────────────────────────────────── */
 #title-screen {
@@ -304,3 +312,158 @@ html, body {
 .toast.alerta { border-left-color: var(--alert); }
 
 .oculto { display: none !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MÓVIL (ADR-008) — el juego nació en escritorio; aquí se reajusta entero.
+   Estrategia: anchos fijos → relativos, tipografías escaladas, paneles del
+   aeropuerto apilados y encogidos, y todo objetivo táctil ≥ 48 px.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1024px) {
+  html, body { font-size: 13px; }
+
+  /* Título */
+  .title-inner { max-width: 92vw; padding: 16px; }
+  #title-screen h1 { font-size: clamp(38px, 13vw, 64px); letter-spacing: 6px; }
+  .title-sub { font-size: 12px; margin: 18px 0 26px; }
+  .title-badge { font-size: 10px; letter-spacing: 2px; margin-bottom: 18px; }
+  #btn-start { font-size: 15px; padding: 15px 34px; min-height: 52px; }
+
+  /* Topbar: dos líneas antes que texto cortado */
+  .topbar { padding: 8px 10px; font-size: 9px; letter-spacing: 1px; gap: 8px; flex-wrap: wrap; }
+
+  /* Diálogo: ancho completo abajo, sin tapar la acción */
+  .dialogo {
+    left: 50%; right: auto; bottom: 15%;
+    width: 92vw; max-width: 92vw; min-width: 0;
+    font-size: 15px; padding: 12px 14px; line-height: 1.45;
+  }
+
+  /* Dock: los botones se envuelven y crecen para el dedo */
+  .dock { flex-wrap: wrap; gap: 6px; padding: 10px 8px 14px; }
+  .dock button, .panel button { font-size: 11px; padding: 13px 12px; min-height: 48px; letter-spacing: 1px; }
+
+  /* Paneles laterales: ya no caben a los lados — se encogen y suben */
+  #expediente { top: 46px; right: 8px; width: 44vw; max-width: 210px; max-height: 30vh; padding: 10px; }
+  #expediente .señal { font-size: 10px; padding: 6px 8px; }
+  #ficha { top: 46px; left: 8px; width: 44vw; max-width: 220px; padding: 10px; }
+  #ficha .nombre { font-size: 15px; }
+  #ficha .meta { font-size: 10px; }
+  #ficha .obs { font-size: 11px; }
+
+  /* Libreta del interrogatorio: a pantalla casi completa */
+  #interrogatorio {
+    left: 50%; bottom: 12px; transform: translateX(-50%) rotate(-0.5deg);
+    width: 94vw; max-width: 94vw; max-height: 62vh; overflow-y: auto;
+    padding: 12px 14px 10px; border-left-width: 10px;
+  }
+  #interrogatorio button.tema { font-size: 15px; padding: 10px 4px; min-height: 44px; }
+  #interrogatorio .tacticas { flex-wrap: wrap; gap: 6px; }
+  #interrogatorio button.tactica { min-width: 30%; min-height: 54px; }
+
+  /* Documentos: una columna centrada */
+  #documentos {
+    right: 50%; transform: translateX(50%); bottom: 76px;
+    width: 94vw; max-width: 94vw; max-height: 58vh;
+  }
+  #documentos .doc, .doc { width: 100%; max-width: 92vw; padding: 14px 16px 18px; }
+  .doc .linea { font-size: 13px; padding: 9px 4px; }
+
+  /* Rayos X / decisión / corporal */
+  #xray-label { font-size: 11px; padding: 8px 12px; max-width: 92vw; top: 54px; }
+  #xray-controls { bottom: 76px; flex-wrap: wrap; justify-content: center; width: 94vw; }
+  #decision { bottom: 76px; width: 94vw; }
+  #decision .sellos { flex-wrap: wrap; gap: 8px; }
+  #decision button { font-size: 12px; padding: 14px 14px; flex: 1 1 40%; }
+  #corporal { width: 92vw; }
+  #corporal svg { width: 45vw; max-width: 190px; }
+
+  /* Hojas (briefing, resumen) */
+  .sheet { width: 94vw; max-width: 94vw; max-height: 86vh; padding: 20px 18px; }
+  .sheet h2 { font-size: 16px; letter-spacing: 2px; }
+  .sheet .brief-body { font-size: 14px; }
+  .sheet button { min-height: 50px; padding: 14px 22px; }
+
+  /* Consecuencia */
+  #consecuencia .texto { max-width: 92vw; font-size: 15px; bottom: 22vh; }
+  #consecuencia .continuar { min-height: 48px; padding: 13px 22px; }
+
+  .toast { max-width: 92vw; font-size: 12px; top: 16%; }
+}
+
+/* Pantallas muy bajas (móvil apaisado): recuperar altura vertical */
+@media (max-height: 460px) and (pointer: coarse) {
+  .dialogo { bottom: 8%; font-size: 13px; padding: 9px 12px; }
+  .topbar { padding: 5px 10px; }
+  #expediente, #ficha { max-height: 40vh; top: 40px; }
+  #interrogatorio { max-height: 74vh; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TÁCTIL (sin importar el ancho) — un móvil apaisado puede medir 932 px y
+   NO entrar en `max-width: 768px`. Por eso estas reglas se anclan al puntero
+   grueso: si hay dedo, hay móvil. Tipografías fluidas con clamp() y TODO
+   panel con scroll propio para que ningún texto se desborde jamás.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (pointer: coarse) {
+  /* Paneles de datos: nunca más texto derramado fuera de la caja */
+  #ficha, #expediente, #documentos, #interrogatorio, .sheet, #corporal {
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  #ficha {
+    width: clamp(150px, 34vw, 260px);
+    max-height: 34vh; padding: 10px 12px;
+    line-height: 1.45;
+  }
+  #ficha .nombre { font-size: clamp(13px, 2.1vw, 18px); line-height: 1.25; }
+  #ficha .meta { font-size: clamp(9px, 1.4vw, 11px); line-height: 1.4; margin: 3px 0 7px; }
+  #ficha .obs { font-size: clamp(10px, 1.5vw, 12px); line-height: 1.45; }
+
+  #expediente {
+    width: clamp(150px, 34vw, 260px);
+    max-height: 30vh; padding: 10px 12px;
+  }
+  #expediente .señal { font-size: clamp(9px, 1.4vw, 11px); line-height: 1.4; padding: 6px 8px; }
+
+  /* Diálogo: cinta inferior fluida que no tapa la escena */
+  .dialogo {
+    width: min(92vw, 700px); max-width: 92vw; min-width: 0;
+    font-size: clamp(12px, 1.9vw, 17px); line-height: 1.4;
+    padding: 10px 14px; bottom: 16%;
+    max-height: 26vh; overflow-y: auto;
+  }
+
+  /* Dock: envuelve y respeta el mínimo táctil */
+  .dock { flex-wrap: wrap; gap: 6px; padding: 8px 6px 12px; }
+  .dock button, .panel button {
+    font-size: clamp(9px, 1.5vw, 12px); padding: 12px 10px;
+    min-height: 48px; letter-spacing: .08em;
+  }
+
+  /* Hojas y consecuencia */
+  .sheet { width: min(94vw, 620px); max-height: 84vh; padding: clamp(14px, 3vw, 30px); }
+  .sheet h2 { font-size: clamp(14px, 2.4vw, 20px); }
+  .sheet .brief-body, .sheet .fila-resultado { font-size: clamp(11px, 1.7vw, 15px); line-height: 1.5; }
+  #consecuencia .texto { max-width: 92vw; font-size: clamp(12px, 2vw, 18px); }
+
+  .toast { max-width: 92vw; font-size: clamp(10px, 1.6vw, 13px); }
+  .topbar { font-size: clamp(8px, 1.2vw, 11px); padding: 7px 10px; gap: 6px; }
+}
+
+/* ── Aviso de rotación: el juego pide apaisado ─────────────────────────── */
+#rotate-hint {
+  position: fixed; inset: 0; z-index: 9999; display: none;
+  align-items: center; justify-content: center; text-align: center;
+  background: linear-gradient(#080c12, #05070b); color: var(--ink);
+  font-family: var(--mono); padding: 30px;
+}
+#rotate-hint .rh-ico { font-size: 64px; display: block; margin-bottom: 20px;
+  animation: rot-tilt 1.8s ease-in-out infinite; }
+#rotate-hint b { display: block; font-size: 17px; letter-spacing: 3px; color: var(--accent); margin-bottom: 12px; }
+#rotate-hint p { color: var(--ink-dim); font-size: 13px; line-height: 1.7; max-width: 320px; margin: 0 auto; }
+@keyframes rot-tilt { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
+
+/* Solo en móvil vertical: pedir que giren el aparato */
+@media (orientation: portrait) and (pointer: coarse) and (max-width: 900px) {
+  body.needs-landscape #rotate-hint { display: flex; }
+}

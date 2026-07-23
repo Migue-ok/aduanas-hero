@@ -1,0 +1,249 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADUANAS HERO — SISTEMA DE DISEÑO "MESA TÁCTICA" (ADR-009)
+   ───────────────────────────────────────────────────────────────────────────
+   Antes: tres HUDs con ~150 líneas de CSS casi idénticas cada uno, paneles
+   planos con borde gris de 1px y Courier New para absolutamente todo.
+   Ahora: un único set de tokens + primitivas de cristal esmerilado que las tres
+   escenas comparten. Referencia visual: interfaz táctica de intervención
+   (translúcida, alto contraste, ámbar institucional sobre azul noche).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Superficies de cristal */
+  --g-bg: rgba(13, 19, 28, 0.62);
+  --g-bg-solid: rgba(11, 16, 24, 0.9);
+  --g-border: rgba(148, 176, 208, 0.16);
+  --g-border-hot: rgba(224, 149, 42, 0.55);
+  --g-blur: blur(14px) saturate(1.25);
+  --g-shadow: 0 18px 48px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255, 255, 255, 0.07) inset;
+
+  /* Tinta */
+  --t-hi: #f2f6fa;
+  --t-mid: #b9c6d4;
+  --t-low: #7d8ea1;
+
+  /* Acentos */
+  --a-amber: #e0952a;
+  --a-red: #e04a3c;
+  --a-green: #3fc47f;
+  --a-cyan: #4fd0e0;
+
+  /* Tipografía: jerarquía real (display / texto / datos) */
+  --f-display: 'Bahnschrift', 'DIN Alternate', 'Segoe UI Semibold', system-ui, sans-serif;
+  --f-body: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+  --f-data: 'Consolas', 'SF Mono', 'Courier New', monospace;
+
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 18px;
+}
+
+/* ── Primitivas ─────────────────────────────────────────────────────────── */
+
+/* Panel de cristal: la superficie base de todo el HUD */
+.g-panel {
+  background: var(--g-bg);
+  -webkit-backdrop-filter: var(--g-blur);
+  backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--g-shadow);
+}
+
+/* Píldora de datos (contadores, estado, cronómetro) */
+.g-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: 999px;
+  background: var(--g-bg);
+  -webkit-backdrop-filter: var(--g-blur);
+  backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border);
+  font-family: var(--f-data); font-size: 12px; letter-spacing: 0.08em;
+  color: var(--t-mid);
+}
+
+/* Botón táctico: alto contraste, ≥48 px, con barrido de luz al pulsar */
+.g-btn {
+  position: relative; overflow: hidden;
+  min-height: 48px; padding: 13px 24px; cursor: pointer;
+  font-family: var(--f-display); font-size: 14px; letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t-hi);
+  background: var(--g-bg-solid);
+  -webkit-backdrop-filter: var(--g-blur);
+  backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border); border-radius: var(--r-sm);
+  transition: border-color .18s, color .18s, transform .09s, box-shadow .18s;
+}
+.g-btn::after { /* destello diagonal al pasar/pulsar */
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.16) 50%, transparent 62%);
+  transform: translateX(-120%); transition: transform .5s ease;
+}
+.g-btn:hover { border-color: var(--g-border-hot); color: #fff; box-shadow: 0 0 0 1px var(--g-border-hot), 0 10px 30px rgba(224,149,42,.14); }
+.g-btn:hover::after { transform: translateX(120%); }
+.g-btn:active { transform: translateY(1px) scale(.985); }
+.g-btn--primary { border-color: var(--g-border-hot); color: var(--a-amber); }
+.g-btn--danger { border-color: rgba(224,74,60,.5); color: var(--a-red); }
+.g-btn--ok { border-color: rgba(63,196,127,.45); color: var(--a-green); }
+
+/* Subtítulo cinematográfico: barra inferior, sin caja pesada */
+.g-sub {
+  background: linear-gradient(90deg, rgba(8,12,18,.86), rgba(8,12,18,.62));
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-left: 3px solid var(--a-amber);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-family: var(--f-body); font-size: 18px; line-height: 1.5;
+  color: var(--t-hi); padding: 14px 20px;
+  box-shadow: var(--g-shadow);
+}
+.g-sub b { color: var(--a-amber); font-weight: 600; }
+
+/* Aviso/objetivo: cinta fina y discreta */
+.g-tag {
+  font-family: var(--f-data); font-size: 12px; letter-spacing: 0.1em;
+  color: var(--t-mid); padding: 8px 14px; border-radius: var(--r-sm);
+  background: var(--g-bg);
+  -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border);
+  border-top: 1px solid rgba(224,149,42,.32);
+}
+
+/* Tecla / gesto */
+.g-key {
+  display: inline-block; min-width: 22px; padding: 3px 8px; margin: 0 3px;
+  background: var(--a-amber); color: #10151b; border-radius: 4px;
+  font-family: var(--f-data); font-weight: 700; font-size: 12px;
+}
+
+/* Título de escena */
+.g-title {
+  font-family: var(--f-display); font-weight: 700;
+  letter-spacing: 0.04em; color: var(--t-hi);
+  text-shadow: 0 4px 30px rgba(90, 140, 210, 0.28);
+}
+
+/* Barra de progreso/tensión */
+.g-meter { height: 10px; border-radius: 999px; background: rgba(255,255,255,.09); overflow: hidden; }
+.g-meter > i {
+  display: block; height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--a-red), var(--a-amber));
+  box-shadow: 0 0 16px rgba(224,149,42,.6);
+  transition: width .12s linear;
+}
+
+/* Barrido de escaneo: da vida a los paneles de datos */
+@keyframes g-scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
+.g-scanline { position: relative; overflow: hidden; }
+.g-scanline::before {
+  content: ''; position: absolute; left: 0; right: 0; height: 22%;
+  background: linear-gradient(rgba(79,208,224,0), rgba(79,208,224,.07), rgba(79,208,224,0));
+  animation: g-scan 4.5s linear infinite; pointer-events: none;
+}
+
+/* Navegadores sin backdrop-filter: opacamos para conservar legibilidad */
+@supports not (backdrop-filter: blur(1px)) {
+  .g-panel, .g-pill, .g-btn, .g-tag { background: var(--g-bg-solid); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CAPA DE ELEVACIÓN — migra los 3 HUDs existentes al sistema sin reescribirlos
+   ───────────────────────────────────────────────────────────────────────────
+   Los HUDs de los niveles 2 y 3 inyectan su propio CSS y el del aeropuerto vive
+   en style.css. En vez de reescribir tres bloques enormes (y arriesgar romper
+   posicionamiento ya probado), aquí se ELEVAN sus componentes al lenguaje de
+   cristal. Solo se tocan superficie, tipografía y profundidad: ni una posición.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* — Barras superiores de los tres niveles — */
+.topbar, #port-hud .ph-topbar, #raid-hud .rh-topbar {
+  background: linear-gradient(180deg, rgba(8, 12, 18, 0.82), rgba(8, 12, 18, 0)) !important;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  font-family: var(--f-data);
+  border-bottom: 1px solid rgba(148, 176, 208, 0.08);
+}
+
+/* — Subtítulos y diálogo: barra cinematográfica, no caja de texto — */
+.dialogo, #raid-hud .rh-sub {
+  background: linear-gradient(90deg, rgba(8,12,18,.88), rgba(8,12,18,.6)) !important;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border: none !important; border-left: 3px solid var(--a-amber) !important;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  box-shadow: var(--g-shadow);
+  font-family: var(--f-body) !important; font-style: normal !important;
+  color: var(--t-hi);
+}
+#raid-hud .rh-sub b, .dialogo .hablante { color: var(--a-amber) !important; }
+
+/* — Avisos/objetivos/prompts: cinta fina de cristal — */
+#raid-hud .rh-obj, #port-hud .ph-prompt, #port-hud .ph-hint, #raid-hud .rh-hint,
+#xray-label, .toast, #port-hud .ph-toast, #raid-hud .rh-toast, #port-hud .ph-scan, #raid-hud .rh-scan {
+  background: var(--g-bg) !important;
+  -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border) !important;
+  border-radius: var(--r-sm);
+  box-shadow: var(--g-shadow);
+  font-family: var(--f-data);
+}
+#port-hud .ph-prompt, #raid-hud .rh-obj { border-top-color: rgba(224,149,42,.4) !important; }
+.toast.alerta, #port-hud .ph-toast.bad { border-left: 3px solid var(--a-red) !important; }
+#port-hud .ph-toast.ok { border-left: 3px solid var(--a-green) !important; }
+
+/* — Teclas — */
+#port-hud kbd, #raid-hud kbd {
+  background: var(--a-amber) !important; color: #10151b !important;
+  border-radius: 4px; font-family: var(--f-data); font-weight: 700;
+}
+
+/* — Botones: un solo lenguaje táctico en todo el juego — */
+.dock button, .panel button, #btn-start, .sheet button,
+#port-hud .ph-start-btn, #port-hud .ph-exit, #port-hud .ph-summary-card button,
+#raid-hud .rh-start-btn, #raid-hud .rh-exit, #raid-hud .rh-final-card button,
+#consecuencia .continuar {
+  position: relative; overflow: hidden;
+  font-family: var(--f-display) !important; letter-spacing: .14em;
+  background: var(--g-bg-solid) !important;
+  -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border) !important; border-radius: var(--r-sm);
+  transition: border-color .18s, color .18s, transform .09s, box-shadow .18s;
+}
+.dock button:hover, .panel button:hover, #btn-start:hover, .sheet button:hover,
+#port-hud .ph-start-btn:hover, #raid-hud .rh-start-btn:hover, #consecuencia .continuar:hover {
+  border-color: var(--g-border-hot) !important; color: #fff !important;
+  box-shadow: 0 0 0 1px var(--g-border-hot), 0 10px 30px rgba(224,149,42,.16);
+}
+.dock button:active, .panel button:active { transform: translateY(1px) scale(.985); }
+#raid-hud .rh-start-btn { background: linear-gradient(180deg, #d8262c, #a81c22) !important; border-color: rgba(255,120,110,.5) !important; }
+
+/* — Paneles laterales del aeropuerto y tarjetas de resumen — */
+.panel, #expediente, #ficha, #port-hud .ph-check {
+  background: var(--g-bg) !important;
+  -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
+  border: 1px solid var(--g-border) !important;
+  border-radius: var(--r-md);
+  box-shadow: var(--g-shadow);
+}
+.panel h3 { font-family: var(--f-data); color: var(--t-low); }
+
+/* — Títulos: tipografía display de verdad — */
+#title-screen h1, #level-menu .lm-title, #raid-hud .rh-start-inner h1,
+.sheet h2, #raid-hud .rh-final-card h2, #port-hud .ph-summary-card h2 {
+  font-family: var(--f-display) !important;
+  text-shadow: 0 4px 30px rgba(90, 140, 210, 0.3);
+}
+#level-menu .lm-card {
+  border-radius: var(--r-md);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+#level-menu .lm-card-name { font-family: var(--f-display); }
+#level-menu .lm-card-desc, .title-sub, #level-menu .lm-sub { font-family: var(--f-body); }
+
+/* — Cronómetro y medidor: datos con presencia — */
+#raid-hud .rh-timer { font-family: var(--f-display); text-shadow: 0 0 26px rgba(255,90,74,.55); }
+#raid-hud .rh-meter, #port-hud .ph-stats { font-family: var(--f-data); }
+#raid-hud .rh-meter-fill { box-shadow: 0 0 18px rgba(224,149,42,.65); }
+
+/* — Mando táctil: mismo cristal que el resto — */
+.tp-btn, .tp-stick {
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}

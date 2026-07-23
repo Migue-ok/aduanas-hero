@@ -52,4 +52,8 @@ export const Señal = Object.freeze({
   CONSECUENCIA_MOSTRADA: 'consecuencia_mostrada',
   TURNO_FINALIZADO: 'turno_finalizado',
   VISTA_CAMBIADA: 'vista_cambiada',
+  // Nivel 3 · Operativo Trafasport (ADR-007) — aditivas, no rompen el contrato.
+  FASE_COMPLETADA: 'raid_fase_completada',
+  QTE_SUCCESS: 'raid_qte_success',
+  RAID_FINALIZADO: 'raid_finalizado',
 });

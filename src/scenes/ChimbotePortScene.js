@@ -2,7 +2,19 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import * as CANNON from 'cannon-es';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { spawnRig, clearRigCache } from '../world/Rig.js';
+import { quality, isTouch, tuneRaycaster } from '../core/Device.js';
+import { TouchControls } from '../ui/TouchControls.js';
+import { CameraShake, HitStop, popIn, punch, flash } from '../core/Juice.js';
+import { PostFX } from '../render/PostFX.js';
+import { PauseMenu } from '../ui/PauseMenu.js';
+import { PerfGuard } from '../core/PerfGuard.js';
+import { construirPuerto } from '../world/PuertoChimbote.js';
+import { progreso } from '../core/Progreso.js';
+import { disposeScene, disposeObject } from '../core/Disposal.js';
 import { audio } from '../audio/AudioEngine.js';
+import { narrator } from '../audio/Narrator.js';
 import { makeGooglyEyes } from '../world/GooglyEyes.js';
 
 /**
@@ -56,7 +68,12 @@ export class ChimbotePortScene {
     this.activo = null;      // contenedor en el que estoy dentro
     this.aimCrate = null;    // caja bajo la mira
     this.grounded = false;
-    this.reputacion = 50;
+    this.touchPlaying = false;   // en móvil sustituye al PointerLock
+    this._yaw = 0; this._pitch = 0;
+    // La reputación YA NO nace en 50: viene de la carrera (ADR-011).
+    this.reputacion = progreso.reputacion;
+    this.repInicial = this.reputacion;
+    this.ronda = 1; // el turno crece en rondas, no acaba en 5 cajas (ADR-011)
     this.aciertos = 0;
     this.errores = 0;
     this._raf = null;
@@ -66,13 +83,13 @@ export class ChimbotePortScene {
   // ── Ciclo de vida ─────────────────────────────────────────────────────────
   mount() {
     const canvas = document.getElementById('gl');
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias });
+    this.renderer.setPixelRatio(quality.pixelRatio); // ≤1.25 en móvil
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; // evita que la linterna reviente
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 0.88; // deja aire para el bloom
     this.renderer.setClearColor(0x9fb8cc);
 
     this.scene = new THREE.Scene();
@@ -81,9 +98,11 @@ export class ChimbotePortScene {
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
     this.camera.position.set(0, P_R + EYE_OFF, DOCK_Z - 5);
     this.controls = new PointerLockControls(this.camera, canvas);
+    this.shake = new CameraShake(this.camera);
+    this.hitStop = new HitStop();
     this.scene.add(this.camera); // para que la linterna (hija de la cámara) se renderice
 
-    this.ray = new THREE.Raycaster();
+    this.ray = tuneRaycaster(new THREE.Raycaster());
     this.ray.far = 5;
 
     this.#initPhysics();
@@ -92,10 +111,45 @@ export class ChimbotePortScene {
     this.#buildDock();
     this.#buildWater();
     this.#buildStacks();
+    this.#buildPuertoReal(); // grúas, buques, Aduana, planta, fauna (ADR-011)
     this.#buildInspectables();
     this.#buildStevedores();
     this.#buildHUD();
     this.#bindInput();
+
+    // Post-proceso: las alarmas rojas, el oro del contrabando y el destello del
+    // sol en el agua ahora IRRADIAN en vez de ser píxeles de color.
+    this.post = new PostFX(this.renderer, { scene: this.scene, camera: this.camera, bloom: 0.34 });
+
+    // Pausa/ajustes: por fin se puede silenciar al narrador y salir sin recargar.
+    this.pausa = new PauseMenu({
+      onPausa: () => {
+        this.pausado = true;
+        this.pad?.setVisible(false);
+        if (!isTouch) this.controls.unlock(); else this.touchPlaying = false;
+      },
+      onReanudar: () => {
+        this.pausado = false;
+        if (isTouch) { this.touchPlaying = true; this.pad?.setVisible(true); }
+      },
+      onSalir: () => this.onExit(),
+    });
+    this.pausa.mount();
+
+    // Red de seguridad de FPS: recortes de un solo sentido, del más barato al
+    // más doloroso (el muelle es la escena más pesada del juego).
+    this.perf = new PerfGuard([
+      { nombre: 'sombra de linterna off', aplicar: () => { this.flash.castShadow = false; } },
+      { nombre: 'bloom off', aplicar: () => { if (this.post.bloom) this.post.bloom.enabled = false; } },
+      { nombre: 'sombras del sol off', aplicar: () => {
+        const sun = this.scene.children.find((o) => o.isDirectionalLight);
+        if (sun) sun.castShadow = false;
+      } },
+      { nombre: 'pixelRatio 1', aplicar: () => {
+        this.renderer.setPixelRatio(1);
+        this.post.setSize(window.innerWidth, window.innerHeight);
+      } },
+    ]);
 
     this.clock = new THREE.Clock();
     this.#loop();
@@ -108,9 +162,20 @@ export class ChimbotePortScene {
     window.removeEventListener('keyup', this._bound.keyup);
     document.removeEventListener('mousedown', this._bound.mousedown);
     this.controls?.disconnect?.();
+    for (const t of this._voces ?? []) clearTimeout(t);
+    narrator.callar();
+    this.pausa?.destroy();
+    this.pad?.destroy();
     this.overlay?.remove();
     this._styleEl?.remove();
+    // Liberar VRAM de verdad: `scene.remove()` NO libera nada (ADR-009).
+    this.post?.dispose();
+    disposeScene(this.scene);
+    clearRigCache();
     this.renderer?.dispose();
+    this.renderer?.forceContextLoss?.();
+    this.scene = null; this.world = null; this.inspectables.length = 0;
+    this.crateMeshes.length = 0; this.animals.length = 0; this.npcs = [];
   }
 
   // ── Física (cannon-es) ────────────────────────────────────────────────────
@@ -143,13 +208,24 @@ export class ChimbotePortScene {
     this.playerBody.updateMassProperties();
     this.world.addBody(this.playerBody);
 
-    // Contacto con el suelo → habilita el salto.
-    this.playerBody.addEventListener('collide', (e) => {
-      const c = e.contact;
-      const n = new CANNON.Vec3();
-      if (c.bi.id === this.playerBody.id) c.ni.scale(-1, n); else n.copy(c.ni);
-      if (n.y > 0.5) this.grounded = true;
-    });
+    // NOTA (bug corregido): antes esto usaba el evento 'collide', pero cannon-es
+    // NO lo emite en contactos PERSISTENTES — estando quieto sobre el suelo el
+    // evento no volvía a dispararse y el salto era imposible (en móvil y en PC).
+    // Ahora se deriva de los contactos reales del mundo, tras cada step.
+  }
+
+  /** ¿Hay suelo bajo los pies? Se recalcula leyendo los contactos del step. */
+  #actualizarGrounded() {
+    this.grounded = false;
+    for (const c of this.world.contacts) {
+      // `ni` va de bi hacia bj: si el jugador es bi, el suelo queda "debajo"
+      // cuando la normal apunta hacia abajo (ni.y ≈ -1), y al revés si es bj.
+      let n;
+      if (c.bi === this.playerBody) n = -c.ni.y;
+      else if (c.bj === this.playerBody) n = c.ni.y;
+      else continue;
+      if (n > 0.5) { this.grounded = true; return; }
+    }
   }
 
   #addBoxBody(cx, cy, cz, hx, hy, hz) {
@@ -169,12 +245,19 @@ export class ChimbotePortScene {
     const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
     sun.position.set(-30, 44, 24);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const d = 58;
+    sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
+    // Frustum APRETADO al muelle jugable: antes cubría 116 u con un mapa de 512
+    // (¡23 cm por téxel!) y eso es shadow acne garantizado en móvil.
+    const d = 38;
     sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
     sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
-    sun.shadow.camera.far = 150;
-    sun.shadow.bias = -0.0004;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 120;
+    sun.shadow.bias = -0.0005;
+    // normalBias es LA cura del acne: desplaza el muestreo a lo largo de la
+    // normal, así una superficie no se sombrea a sí misma por error de téxel.
+    sun.shadow.normalBias = quality.mobile ? 0.08 : 0.03;
+    sun.shadow.camera.updateProjectionMatrix();
     this.scene.add(sun);
 
     this.alarmLight = new THREE.PointLight(0xff2a2a, 0, 14);
@@ -186,8 +269,8 @@ export class ChimbotePortScene {
     // decay 2 (físico) + tone mapping ACES: cono cálido con caída, sin reventar.
     this.flash = new THREE.SpotLight(0xfff0cf, 0, 20, Math.PI / 5, 0.55, 2);
     this.flash.position.set(0.15, -0.1, 0.2);
-    this.flash.castShadow = true;
-    this.flash.shadow.mapSize.set(1024, 1024);
+    this.flash.castShadow = !quality.mobile; // la sombra del foco es cara en móvil
+    this.flash.shadow.mapSize.set(quality.spotShadowMap, quality.spotShadowMap);
     this.flash.target.position.set(0, 0, -1);
     this.camera.add(this.flash);
     this.camera.add(this.flash.target);
@@ -196,7 +279,25 @@ export class ChimbotePortScene {
 
   // ── Muelle y agua ─────────────────────────────────────────────────────────
   #buildDock() {
-    const concreto = new THREE.MeshStandardMaterial({ color: 0x8f8d86, roughness: 0.95 });
+    // Concreto PBR real (ambientCG, CC0) + HDRI de puerto al atardecer (Poly Haven).
+    new RGBELoader().load('/hdri/puerto.hdr', (hdr) => {
+      hdr.mapping = THREE.EquirectangularReflectionMapping;
+      this.scene.environment = hdr;
+      this.scene.environmentIntensity = 0.5;
+    });
+    const tl = new THREE.TextureLoader();
+    const rep = (t, srgb = false) => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(10, 8);
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const concreto = new THREE.MeshStandardMaterial({
+      map: rep(tl.load('/textures/concrete/Concrete034_1K-JPG_Color.jpg'), true),
+      normalMap: rep(tl.load('/textures/concrete/Concrete034_1K-JPG_NormalGL.jpg')),
+      roughnessMap: rep(tl.load('/textures/concrete/Concrete034_1K-JPG_Roughness.jpg')),
+      roughness: 1,
+    });
     const dock = new THREE.Mesh(new THREE.BoxGeometry(DOCK_X * 2, 1, DOCK_Z * 2), concreto);
     dock.position.set(0, -0.5, 0);
     dock.receiveShadow = true;
@@ -218,7 +319,8 @@ export class ChimbotePortScene {
   }
 
   #buildWater() {
-    const geo = new THREE.PlaneGeometry(600, 600, 120, 120);
+    const seg = quality.aguaSegmentos; // 120 en PC · 64 en móvil
+    const geo = new THREE.PlaneGeometry(600, 600, seg, seg);
     geo.rotateX(-Math.PI / 2);
     this.waterMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -273,6 +375,20 @@ export class ChimbotePortScene {
     this.scene.add(this.water);
   }
 
+  /**
+   * Ambientación real del Puerto de Chimbote (ADR-011): grúas pórtico, buque
+   * portacontenedores, bolicheras de la flota anchovetera, edificio de la
+   * Aduana, planta de harina, Isla Blanca, lobos marinos y bandadas de
+   * pelícanos y gaviotas. Antes el muelle era un rectángulo pelado.
+   */
+  #buildPuertoReal() {
+    this.puerto = construirPuerto(this.scene, { DOCK_X, DOCK_Z });
+    // Las estructuras sólidas (patas de grúa, Aduana) también estorban de verdad.
+    for (const c of this.puerto.colisiones) {
+      this.#addBoxBody(c.x, 3, c.z, c.hx, 3, c.hz);
+    }
+  }
+
   #buildStacks() {
     const filas = [-9, -16, -23];
     const columnas = [-24, -15, -6, 6, 15, 24];
@@ -308,16 +424,24 @@ export class ChimbotePortScene {
   }
 
   // ── Contenedores inspeccionables (huecos, se entra dentro) ────────────────
+  /**
+   * Genera un caso. La RONDA sube la apuesta (ADR-011): más proporción de
+   * contrabando y, desde la ronda 2, los contrabandistas aprenden a disimular
+   * (el cajón deja de llevar flejes delatores y hay que usar los rayos X).
+   */
   #genCaso() {
+    const ronda = this.ronda ?? 1;
     const carga = CARGAS[Math.floor(Math.random() * CARGAS.length)];
-    const contrabando = Math.random() < 0.5;
+    const contrabando = Math.random() < Math.min(0.78, 0.45 + ronda * 0.1);
     // Tipo de contrabando: fauna viva ~40 %, oro, o billetes.
     let tipoContra = null;
     if (contrabando) {
       const r = Math.random();
       tipoContra = r < 0.4 ? 'animal' : r < 0.7 ? 'oro' : 'billetes';
     }
-    return { carga, contrabando, tipoContra, resuelto: false, hallado: false };
+    // Disimulo: el cajón sospechoso ya no se delata a simple vista.
+    const disimulado = contrabando && ronda >= 2 && Math.random() < Math.min(0.85, 0.35 + ronda * 0.18);
+    return { carga, contrabando, tipoContra, disimulado, resuelto: false, hallado: false };
   }
 
   #buildInspectables() {
@@ -343,12 +467,27 @@ export class ChimbotePortScene {
       panel(C_L, C_H, WALL, 0, C_H / 2, -C_W / 2, extMat);        // fondo
       panel(WALL, C_H, C_W, -C_L / 2, C_H / 2, 0, extMat);        // costado izq
       panel(WALL, C_H, C_W, C_L / 2, C_H / 2, 0, extMat);         // costado der
-      // Liner interior oscuro (paredes/fondo por dentro): vende la oscuridad.
-      const liner = new THREE.Mesh(new THREE.BoxGeometry(C_L - 0.1, C_H - 0.1, C_W - 0.1),
-        new THREE.MeshStandardMaterial({ color: 0x1c1814, roughness: 1, side: THREE.BackSide }));
-      liner.position.set(0, C_H / 2, 0);
-      liner.receiveShadow = true;
-      grupo.add(liner);
+      // Forro interior oscuro. BUG CORREGIDO: antes era una CAJA CERRADA con
+      // BackSide, así que su cara frontal tapaba el mundo exterior al entrar
+      // («todo se ponía negro»). Ahora son 4 planos sueltos —fondo, laterales y
+      // techo— y el frente queda LIBRE: desde dentro se ve el muelle.
+      const forroMat = new THREE.MeshStandardMaterial({ color: 0x1c1814, roughness: 1 });
+      const forro = (w, h, rx, ry, px, py, pz) => {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), forroMat);
+        m.rotation.set(rx, ry, 0);
+        m.position.set(px, py, pz);
+        m.receiveShadow = true;
+        grupo.add(m);
+      };
+      // OJO (bug corregido): con separación 0.06 el forro quedaba EXACTAMENTE
+      // sobre la cara interior del panel (grosor WALL=0.12 → cara a ±0.06) y
+      // producía Z-FIGHTING: el punteado negro que parpadeaba al mover la cámara.
+      // Se separan 0.09 (3 cm de aire) para que no compitan por el mismo píxel.
+      const SEP = 0.09;
+      forro(C_L - 0.1, C_H - 0.1, 0, 0, 0, C_H / 2, -C_W / 2 + SEP);            // fondo
+      forro(C_W - 0.1, C_H - 0.1, 0, Math.PI / 2, -C_L / 2 + SEP, C_H / 2, 0);  // lateral izq
+      forro(C_W - 0.1, C_H - 0.1, 0, -Math.PI / 2, C_L / 2 - SEP, C_H / 2, 0);  // lateral der
+      forro(C_L - 0.1, C_W - 0.1, Math.PI / 2, 0, 0, C_H - SEP, 0);             // techo
 
       // Puertas en la cara frontal (+z), bisagra en los cantos, baten hacia afuera.
       const puertaMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tono).offsetHSL(0, 0, -0.14), roughness: 0.5, metalness: 0.25 });
@@ -438,13 +577,16 @@ export class ChimbotePortScene {
       tapa.position.set(0, h, 0); tapa.castShadow = true;
       caja.add(tapa);
 
-      // Detalle sospechoso: flejes metálicos en el frente.
-      if (esSosp) {
+      // Detalle sospechoso: flejes metálicos. Si el caso está DISIMULADO
+      // (rondas altas), no se ponen: hay que cazarlo con los rayos X.
+      const flejes = [];
+      if (esSosp && !insp.caso.disimulado) {
         const flejeMat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.4, metalness: 0.8 });
         for (const fx of [-s * 0.3, s * 0.3]) {
           const fleje = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, s * 1.03), flejeMat);
           fleje.position.set(fx, h / 2, 0);
           caja.add(fleje);
+          flejes.push(fleje);
         }
       }
 
@@ -457,7 +599,11 @@ export class ChimbotePortScene {
       contenido.visible = false;
       caja.add(contenido);
 
-      const crate = { insp, esSosp, abierta: false, tapa, contenido, mat, mesh: caja, tipo };
+      const crate = {
+        insp, esSosp, abierta: false, tapa, contenido, mat, mesh: caja, tipo, flejes,
+        tam: s,                                                   // para regenerar contenido
+        tapaHome: { pos: tapa.position.clone(), rot: tapa.rotation.clone() }, // para reponerla
+      };
       caja.userData.crate = crate;
       insp.grupo.add(caja);
       insp.crates.push(crate);
@@ -661,7 +807,7 @@ export class ChimbotePortScene {
    * Cinemática de intervención: dos oficiales googly entran al contenedor,
    * caminan hasta la caja, incautan la mercancía (desaparece) y te saludan.
    */
-  #intervencion(insp, onDone) {
+  async #intervencion(insp, onDone) {
     const susp = insp.crates.find((c) => c.esSosp);
     const esAnimal = insp.caso.tipoContra === 'animal';
     const uni = esAnimal ? 0x2f5a2a : 0x1b2740; // Policía Ecológica (verde) vs Aduanas (azul)
@@ -671,14 +817,27 @@ export class ChimbotePortScene {
     const squad = [];
     const tl = gsap.timeline({ onComplete: () => onDone && onDone() });
 
-    [-1, 1].forEach((side) => {
-      const o = this.#makeOficial(uni);
+    // Escuadrón riggeado (Knight; teñido de verde si es rescate ecológico).
+    const rigs = await Promise.all([0, 1].map(() =>
+      spawnRig('/models/Oficial.glb', { targetHeight: 1.85, tint: esAnimal ? 0x5fae55 : null }).catch(() => null)));
+    this.squadRigs = rigs.filter(Boolean);
+
+    [-1, 1].forEach((side, idx) => {
+      let o;
+      if (rigs[idx]) {
+        o = { g: new THREE.Group(), rig: rigs[idx] };
+        o.g.add(rigs[idx].model);
+        rigs[idx].play('Running_A');
+      } else {
+        o = this.#makeOficial(uni);
+      }
       o.g.position.set(insp.pos.x + side * 1.0, 0, frenteZ);
       o.g.rotation.y = Math.PI; // mirando hacia dentro (-z)
       this.scene.add(o.g);
       squad.push(o);
       tl.to(o.g.position, { x: target.x + side * 0.7, z: target.z + 0.9, duration: 1.3, ease: 'power1.inOut' }, 0.1);
-      tl.to(o.g.position, { y: 0.07, duration: 0.17, yoyo: true, repeat: 7, ease: 'sine.inOut' }, 0.1); // trote
+      if (!o.rig) tl.to(o.g.position, { y: 0.07, duration: 0.17, yoyo: true, repeat: 7, ease: 'sine.inOut' }, 0.1); // trote fallback
+      else tl.add(() => o.rig.play('Idle'), 1.4); // llegó: en posición
     });
 
     // Incautar / rescatar: la mercancía (o el animal) se esfuma en sus manos.
@@ -691,14 +850,15 @@ export class ChimbotePortScene {
       if (susp) gsap.to(susp.contenido.scale, { x: 0.01, y: 0.01, z: 0.01, duration: 0.5, onComplete: () => { susp.contenido.visible = false; } });
     }, '>');
 
-    // Girar hacia el jugador, parpadear y saludar.
+    // Girar hacia el jugador y saludar (clip Cheer en el rig; brazo en el fallback).
     tl.add(() => {
       for (const o of squad) {
         o.g.rotation.y = Math.atan2(this.camera.position.x - o.g.position.x, this.camera.position.z - o.g.position.z);
-        o.googly.blink();
+        o.googly?.blink();
+        o.rig?.play('Cheer');
       }
     }, '>');
-    for (const o of squad) tl.to(o.armR.rotation, { z: -2.5, x: -0.35, duration: 0.35, ease: 'power2.out' }, '<');
+    for (const o of squad) { if (o.armR) tl.to(o.armR.rotation, { z: -2.5, x: -0.35, duration: 0.35, ease: 'power2.out' }, '<'); }
     tl.add(() => {
       audio.stinger();
       this.#toast(esAnimal
@@ -709,10 +869,11 @@ export class ChimbotePortScene {
 
     // Bajar el brazo, salir del contenedor y despawn.
     for (const o of squad) {
-      tl.to(o.armR.rotation, { z: o.armRBase, x: 0, duration: 0.3 }, '>');
+      if (o.armR) tl.to(o.armR.rotation, { z: o.armRBase, x: 0, duration: 0.3 }, '>');
+      else tl.add(() => o.rig?.play('Running_A'), '>');
       tl.to(o.g.position, { x: insp.pos.x, z: frenteZ + 2.6, duration: 1.1, ease: 'power1.in' }, '<');
     }
-    tl.add(() => { for (const o of squad) this.scene.remove(o.g); });
+    tl.add(() => { for (const o of squad) this.scene.remove(o.g); this.squadRigs = null; });
     return tl;
   }
 
@@ -744,7 +905,18 @@ export class ChimbotePortScene {
       g.rotation.y = Math.atan2(-s.x, DOCK_Z - s.z);
       this.scene.add(g);
       this.#addBoxBody(s.x, 0.95, s.z, 0.4, 1, 0.4);
-      this.npcs.push({ g, googly, phase: (s.x + s.z) * 0.5, body });
+      const npc = { g, googly, phase: (s.x + s.z) * 0.5, body };
+      this.npcs.push(npc);
+      // Migración a rig (KayKit Barbarian: el estibador fornido). Async; el
+      // googly procedural queda de fallback hasta que llega el GLB.
+      spawnRig('/models/Estibador.glb', { targetHeight: 1.9 }).then((rig) => {
+        npc.g.clear();
+        npc.googly = null;
+        npc.body = null;
+        npc.rig = rig;
+        npc.g.add(rig.model);
+        rig.play('Idle');
+      }).catch(() => {});
     }
   }
 
@@ -767,8 +939,10 @@ export class ChimbotePortScene {
         <div class="ph-start-inner">
           <div class="ph-start-title">MUELLE 7 · CARGA GENERAL</div>
           <p>Cinco contenedores marcados. Entra, alumbra con tu linterna y abre las cajas: el contrabando no se declara solo.</p>
-          <button class="ph-start-btn">▶ CLIC PARA PATRULLAR</button>
-          <p class="ph-keys"><b>WASD</b> caminar · <b>Espacio</b> saltar · <b>E</b> abrir contenedor · <b>Clic</b> abrir caja · <b>X</b> rayos X</p>
+          <button class="ph-start-btn">▶ ${isTouch ? 'TOCA PARA PATRULLAR' : 'CLIC PARA PATRULLAR'}</button>
+          <p class="ph-keys">${isTouch
+            ? '<b>Joystick</b> caminar · <b>arrastra</b> para mirar · <b>⤴</b> saltar · <b>🚪</b> abrir · <b>toca</b> una caja para abrirla'
+            : '<b>WASD</b> caminar · <b>Espacio</b> saltar · <b>E</b> abrir contenedor · <b>Clic</b> abrir caja · <b>X</b> rayos X'}</p>
         </div>
       </div>
       <div class="ph-summary hidden"><div class="ph-summary-card"></div></div>`;
@@ -783,13 +957,39 @@ export class ChimbotePortScene {
     this.$summary = el.querySelector('.ph-summary');
     this.$summaryCard = el.querySelector('.ph-summary-card');
 
+    // Mando virtual del muelle: joystick + las acciones que en PC son teclas.
+    this.pad = new TouchControls({
+      joystick: true,
+      onLook: (dx, dy) => this.#look(dx, dy),
+      buttons: [
+        { code: 'KeyG', label: '✅', hint: 'LIBERAR', small: true },
+        { code: 'KeyF', label: '🚫', hint: 'DECOMISAR', small: true },
+        { code: 'KeyX', label: '📟', hint: 'RAYOS X', small: true },
+        { code: 'KeyE', label: '🚪', hint: 'ABRIR' },
+        { code: 'Space', label: '⤴', hint: 'SALTAR' },
+      ],
+    });
+    this.pad.mount();
+    this.pad.setVisible(false);
+
     el.querySelector('.ph-start-btn').addEventListener('click', () => {
-      audio.startPort(); audio.cuernoBarco(); this.controls.lock();
+      audio.startPort(); audio.cuernoBarco();
+      if (isTouch) {
+        // Sin PointerLock en móvil: entramos en juego con nuestro interruptor.
+        this.touchPlaying = true;
+        this.$start.classList.add('hidden');
+        this.pad.setVisible(true);
+      } else {
+        this.controls.lock();
+      }
+      // El muelle deja de ser mudo: el narrador da la orden de servicio.
+      this.#narrar('Muelle siete, Puerto de Chimbote. Cinco contenedores marcados para revisión. '
+        + 'Entra, alumbra con tu linterna y abre las cajas: el contrabando no se declara solo.', 700);
     });
     el.querySelector('.ph-exit').addEventListener('click', () => this.onExit());
     this.controls.addEventListener('lock', () => this.$start.classList.add('hidden'));
     this.controls.addEventListener('unlock', () => {
-      if (!this.#terminado()) this.$start.classList.remove('hidden');
+      if (!isTouch && !this.#terminado()) this.$start.classList.remove('hidden');
     });
     this.#updateStats();
     this.#injectStyles();
@@ -798,12 +998,28 @@ export class ChimbotePortScene {
   #updateStats() {
     const done = this.inspectables.filter((c) => c.caso.resuelto).length;
     this.$stats.innerHTML = `INSPECCIONADOS ${done}/${this.inspectables.length} · ACIERTOS ${this.aciertos} · REPUTACIÓN ${this.reputacion}/100`;
+    punch(this.$stats); // el marcador reacciona: latigazo al actualizarse
+  }
+
+  /**
+   * Voz del operativo (Narrator). El Nivel 2 estaba mudo frente al 3: aquí el
+   * texto que ya se muestra en pantalla se LEE, con el mismo motor de voz.
+   * Se limpian los emojis y el marcado para que la voz no lea "asterisco b".
+   */
+  #narrar(texto, delayMs = 0) {
+    const limpio = texto.replace(/<[^>]*>/g, '').replace(/[⚠✅🚫📟🚪⤴👃📱🔦]/gu, '').trim();
+    if (!limpio) return;
+    const t = setTimeout(() => narrator.decir(null, limpio, { esNarrador: true }), delayMs);
+    this._voces = this._voces ?? [];
+    this._voces.push(t);
   }
 
   #toast(msg, bad = false) {
+    this.#narrar(msg); // todo aviso importante ahora también se escucha
     this.$toast.className = 'ph-toast ' + (bad ? 'bad' : 'ok');
     this.$toast.innerHTML = msg;
     this.$toast.classList.remove('hidden');
+    popIn(this.$toast); // ya no aparece de la nada: entra con rebote elástico
     clearTimeout(this._toastT);
     this._toastT = setTimeout(() => this.$toast.classList.add('hidden'), 4200);
   }
@@ -852,6 +1068,45 @@ export class ChimbotePortScene {
       #port-hud .ph-summary-card p { color: #b7c3cf; line-height: 1.7; }
       #port-hud .ph-summary-card button { display: block; margin: 16px auto 0; cursor: pointer; background: #23262e;
         color: #eef4f8; border: none; padding: 11px 24px; border-radius: 3px; font-family: inherit; letter-spacing: .1em; pointer-events: auto; }
+
+      /* ── TÁCTIL: anclado al dedo, no al ancho (un móvil apaisado mide 932px) */
+      @media (pointer: coarse) {
+        #port-hud .ph-start-inner, #port-hud .ph-summary-card {
+          max-width: min(520px, 92vw); width: 100%; display: flex; flex-direction: column;
+          align-items: center; gap: clamp(6px, 1.4vh, 14px); margin: auto; }
+        #port-hud .ph-start, #port-hud .ph-summary { overflow-y: auto; padding: clamp(12px,3vh,30px) clamp(12px,4vw,36px); }
+        #port-hud .ph-start-title { font-size: clamp(11px, 1.9vw, 15px); letter-spacing: .2em; margin: 0; }
+        #port-hud .ph-start-inner p, #port-hud .ph-summary-card p {
+          font-size: clamp(11px, 1.7vw, 14px); line-height: 1.5; margin: 0; max-width: 46ch; }
+        #port-hud .ph-keys { font-size: clamp(9px, 1.4vw, 12px) !important; line-height: 1.5; }
+        #port-hud .ph-start-btn { min-height: 48px; padding: clamp(12px,1.8vh,15px) clamp(18px,4vw,28px);
+          font-size: clamp(12px, 1.9vw, 15px); }
+        #port-hud .ph-summary-card h2 { font-size: clamp(15px, 2.5vw, 24px); }
+        #port-hud .ph-toast, #port-hud .ph-prompt, #port-hud .ph-hint, #port-hud .ph-scan {
+          font-size: clamp(10px, 1.6vw, 13px); line-height: 1.45; max-width: 90vw; }
+      }
+
+      /* ── Móvil (ADR-008): el HUD se aparta del mando ──────────────────── */
+      @media (max-width: 900px), (pointer: coarse) and (max-width: 1100px) {
+        #port-hud .ph-topbar { padding: 7px 9px; font-size: 9px; letter-spacing: .05em; gap: 6px; flex-wrap: wrap; }
+        #port-hud .ph-stats { flex: 1 1 100%; order: 3; text-align: center; font-size: 10px; }
+        #port-hud .ph-exit { min-height: 44px; padding: 8px 12px; }
+        /* El prompt y la barra de decisión suben: abajo mandan joystick y botones */
+        #port-hud .ph-prompt { top: 52%; font-size: 13px; padding: 8px 12px; max-width: 90vw; white-space: normal; text-align: center; }
+        #port-hud .ph-hint { bottom: auto; top: 62px; font-size: 11px; max-width: 92vw; text-align: center; line-height: 1.6; }
+        #port-hud .ph-scan { top: 34%; font-size: 12px; max-width: 88vw; padding: 7px 10px; }
+        #port-hud .ph-toast { top: 58px; max-width: 92vw; font-size: 12px; padding: 10px 14px; }
+        #port-hud .ph-start-inner, #port-hud .ph-summary-card { max-width: 92vw; padding: 0 14px; }
+        #port-hud .ph-start-inner p, #port-hud .ph-summary-card p { font-size: 13px; }
+        #port-hud .ph-start-btn { min-height: 54px; padding: 15px 26px; font-size: 15px; }
+        #port-hud .ph-summary-card button { min-height: 50px; }
+        #port-hud .ph-crosshair { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; }
+      }
+      @media (max-height: 460px) and (pointer: coarse) {
+        #port-hud .ph-hint { top: 46px; font-size: 10px; }
+        #port-hud .ph-prompt { top: 56%; font-size: 12px; }
+        #port-hud .ph-toast { top: 44px; font-size: 11px; padding: 7px 12px; }
+      }
     `;
     const style = document.createElement('style');
     style.textContent = css;
@@ -871,12 +1126,24 @@ export class ChimbotePortScene {
     };
     this._bound.keyup = (e) => { this.keys[e.code] = false; };
     this._bound.mousedown = (e) => {
-      if (e.button === 0 && this.controls.isLocked) this.#pryCrate();
+      // Ratón: clic = palanca. Táctil: solo un TAP corto y quieto abre la caja
+      // (si no, mirar alrededor abriría cajas sin querer).
+      if (e.button !== 0 || !this.#enJuego()) return;
+      if (!isTouch) { this.#pryCrate(); return; }
+      const t0 = performance.now();
+      const p0 = { x: e.clientX, y: e.clientY };
+      const fin = (ev) => {
+        window.removeEventListener('pointerup', fin);
+        const quieto = Math.hypot((ev.clientX ?? p0.x) - p0.x, (ev.clientY ?? p0.y) - p0.y) < 14;
+        if (quieto && performance.now() - t0 < 320) this.#pryCrate();
+      };
+      window.addEventListener('pointerup', fin);
     };
     this._bound.resize = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.post?.setSize(window.innerWidth, window.innerHeight);
     };
     window.addEventListener('keydown', this._bound.keydown);
     window.addEventListener('keyup', this._bound.keyup);
@@ -885,9 +1152,23 @@ export class ChimbotePortScene {
   }
 
   #jump() {
-    if (!this.controls.isLocked || !this.grounded) return;
+    if (!this.#enJuego() || !this.grounded) return;
     this.playerBody.velocity.y = JUMP_V;
     this.grounded = false;
+  }
+
+  /**
+   * ¿El jugador tiene el control? En escritorio lo dice el PointerLock; en
+   * móvil no existe, así que manda nuestro propio interruptor (ADR-008).
+   */
+  #enJuego() { return isTouch ? this.touchPlaying : this.controls.isLocked; }
+
+  /** Mirar arrastrando el dedo (sustituye al MouseLook del PointerLock). */
+  #look(dx, dy) {
+    if (!this.touchPlaying || this.inspecting) return;
+    this._yaw -= dx * 0.0042;
+    this._pitch = THREE.MathUtils.clamp(this._pitch - dy * 0.0042, -1.25, 1.25);
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this._pitch, this._yaw, 0, 'YXZ'));
   }
 
   #terminado() { return this.inspectables.every((c) => c.caso.resuelto); }
@@ -915,11 +1196,14 @@ export class ChimbotePortScene {
   }
 
   #tryOpenContainer() {
-    if (!this.controls.isLocked) return;
+    if (!this.#enJuego()) return;
     const c = this.#contenedorCercano();
     if (!c || c.opened) return;
     c.opened = true;
     audio.contenedor();
+    // JUICE: dos toneladas de acero cediendo — la cámara lo acusa.
+    this.shake.add(0.5);
+    this.hitStop.golpe(70);
     // Las puertas baten claramente hacia afuera (se ve en primera persona).
     gsap.to(c.doorR.rotation, { y: -Math.PI * 0.62, duration: 1.4, ease: 'power2.out' });
     gsap.to(c.doorL.rotation, { y: Math.PI * 0.62, duration: 1.4, ease: 'power2.out' });
@@ -945,7 +1229,13 @@ export class ChimbotePortScene {
     const y0 = cr.contenido.position.y;
     gsap.fromTo(cr.contenido.position, { y: y0 }, { y: y0 + 0.6, duration: 0.55, delay: 0.15, ease: 'back.out(2.2)' });
     gsap.from(cr.contenido.rotation, { y: -0.6, duration: 0.8, delay: 0.15, ease: 'power2.out' });
+    // JUICE: la palanca revienta la tapa — golpe seco + micro-congelación.
+    this.shake.add(0.32);
+    this.hitStop.golpe(80);
     if (cr.esSosp) {
+      // Hallazgo: destello ámbar y sacudida fuerte. Esto tiene que sobresaltar.
+      this.shake.add(0.5);
+      flash('#ffe6a0', { opacidad: 0.38, duration: 0.5 });
       cr.insp.caso.hallado = true;
       if (cr.tipo === 'animal') {
         audio.chillido(); audio.aleteo();
@@ -979,14 +1269,25 @@ export class ChimbotePortScene {
     if (!c || c.caso.resuelto) return;
     c.caso.resuelto = true;
     const acierto = decomisar === c.caso.contrabando;
-    if (acierto) { this.aciertos++; this.reputacion = Math.min(100, this.reputacion + 8); }
-    else { this.errores++; this.reputacion = Math.max(0, this.reputacion - 12); audio.beep(false); }
+    // JUICE: el veredicto se SIENTE distinto según sea acierto o error.
+    if (acierto) {
+      this.aciertos++; this.reputacion = Math.min(100, this.reputacion + 8);
+      this.shake.add(0.4); flash('#a8ffd0', { opacidad: 0.3, duration: 0.45 });
+    } else {
+      this.errores++; this.reputacion = Math.max(0, this.reputacion - 12); audio.beep(false);
+      this.shake.add(0.72); this.hitStop.golpe(120); flash('#ff5a4a', { opacidad: 0.42, duration: 0.6 });
+    }
     c.bulbo.material.emissiveIntensity = 0.1;
     this.$hint.classList.add('hidden');
     this.activo = null;
     this.#updateStats();
 
-    const finalize = () => { if (this.#terminado()) { this.controls.unlock(); this.#mostrarResumen(); } };
+    const finalize = () => {
+      if (!this.#terminado()) return;
+      if (isTouch) { this.touchPlaying = false; this.pad?.setVisible(false); }
+      else this.controls.unlock();
+      this.#mostrarResumen();
+    };
 
     if (decomisar && c.caso.contrabando) {
       // Decomiso real: se desata el operativo con dos oficiales.
@@ -1003,16 +1304,79 @@ export class ChimbotePortScene {
     }
   }
 
+  /**
+   * Nueva ronda (ADR-011): el muelle no se acaba en 5 cajas. Llega otro camión,
+   * los casos se regeneran más difíciles y el turno sigue. El bucle pasa de ser
+   * "5 contenedores y fin" a una guardia con presión creciente.
+   */
+  #nuevaRonda() {
+    this.ronda += 1;
+    this.$summary.classList.add('hidden');
+    for (const insp of this.inspectables) {
+      insp.caso = this.#genCaso();
+      insp.opened = false;
+      insp.bulbo.material.emissiveIntensity = 1;
+      // Puertas cerradas y bloqueo frontal restituido.
+      insp.doorL.rotation.y = 0; insp.doorR.rotation.y = 0;
+      if (!insp.frontBody) {
+        insp.frontBody = this.#addBoxBody(insp.pos.x, C_H / 2, insp.pos.z + C_W / 2, C_L / 2, C_H / 2, WALL);
+      }
+      // Cajas: tapas repuestas y contenido nuevo según el caso.
+      const idxSosp = insp.caso.contrabando ? Math.floor(Math.random() * insp.crates.length) : -1;
+      insp.crates.forEach((cr, i) => {
+        cr.abierta = false;
+        cr.esSosp = i === idxSosp;
+        cr.tipo = cr.esSosp ? insp.caso.tipoContra
+          : ['harina', 'zapatillas', 'repuestos'][Math.floor(Math.random() * 3)];
+        // Restituir la tapa (había salido volando y cambiado de padre).
+        cr.mesh.attach(cr.tapa);
+        cr.tapa.position.copy(cr.tapaHome.pos);
+        cr.tapa.rotation.copy(cr.tapaHome.rot);
+        cr.tapa.visible = true;
+        // Contenido nuevo: fuera el viejo (liberando VRAM) y dentro el del caso.
+        disposeObject(cr.contenido);
+        const s = cr.tam;
+        cr.contenido = cr.esSosp ? this.#makeContraband(s, cr.tipo) : this.#makeLegal(s, cr.tipo);
+        cr.contenido.position.y = s * 0.85 * 0.42;
+        cr.contenido.visible = false;
+        cr.mesh.add(cr.contenido);
+        cr.mat.emissive.setHex(0x000000);
+      });
+    }
+    this.activo = null; this.aimCrate = null;
+    this.#updateStats();
+    this.#toast(`RONDA ${this.ronda}: llega otro camión. Los contrabandistas ya saben que estás aquí.`);
+    if (isTouch) { this.touchPlaying = true; this.pad?.setVisible(true); } else this.controls.lock();
+  }
+
   #mostrarResumen() {
     const n = this.inspectables.length;
-    const veredicto = this.aciertos === n ? 'Turno impecable. El muelle está limpio esta noche.'
-      : this.errores >= 3 ? 'Turno duro. Demasiada carga pasó — o demasiada gente pagó sin deberlo.'
-      : 'Turno cerrado. Un oficial más del turno noche.';
+    // Persistir la carrera: lo que pasa en el muelle te sigue al aeropuerto.
+    progreso.ajustarReputacion(this.reputacion - this.repInicial);
+    progreso.cerrarOperativo('chimbote', {
+      aciertos: this.aciertos,
+      errores: this.errores,
+      incautaciones: this.inspectables.filter((c) => c.caso.resuelto && c.caso.contrabando && c.caso.tipoContra !== 'animal').length,
+      rescates: this.inspectables.filter((c) => c.caso.resuelto && c.caso.tipoContra === 'animal').length,
+    });
+    const expulsado = this.reputacion <= 0;
+    const veredicto = expulsado
+      ? 'Reputación a cero. Te retiran la placa: el operativo se cierra sin ti.'
+      : this.aciertos === n ? 'Ronda impecable. El muelle está limpio… por ahora.'
+      : this.errores >= 3 ? 'Ronda dura. Demasiada carga pasó — o demasiada gente pagó sin deberlo.'
+      : 'Ronda cerrada. Un oficial más del turno noche.';
     this.$summaryCard.innerHTML = `
-      <h2>PATRULLA CERRADA · MUELLE 7</h2>
+      <h2>RONDA ${this.ronda} CERRADA · MUELLE 7</h2>
       <p>Contenedores: <b>${n}</b> · Aciertos: <b>${this.aciertos}</b> · Errores: <b>${this.errores}</b><br>
-      Reputación final: <b>${this.reputacion}/100</b></p>
+      Reputación de carrera: <b>${this.reputacion}/100</b> · Rango: <b>${progreso.rango}</b></p>
       <p>${veredicto}</p>`;
+    // La guardia puede continuar: otra ronda, más difícil.
+    if (!expulsado) {
+      const seguir = document.createElement('button');
+      seguir.textContent = `▶ SEGUIR LA GUARDIA · RONDA ${this.ronda + 1}`;
+      seguir.addEventListener('click', () => this.#nuevaRonda());
+      this.$summaryCard.appendChild(seguir);
+    }
     const btn = document.createElement('button');
     btn.textContent = '◄ VOLVER AL MENÚ';
     btn.addEventListener('click', () => this.onExit());
@@ -1023,7 +1387,7 @@ export class ChimbotePortScene {
   // ── Movimiento ────────────────────────────────────────────────────────────
   #move() {
     const b = this.playerBody;
-    if (!this.controls.isLocked) { b.velocity.x = 0; b.velocity.z = 0; return; }
+    if (this.pausado || !this.#enJuego()) { b.velocity.x = 0; b.velocity.z = 0; return; }
     let fx = 0; let fz = 0;
     if (this.keys['KeyW'] || this.keys['ArrowUp']) fz += 1;
     if (this.keys['KeyS'] || this.keys['ArrowDown']) fz -= 1;
@@ -1042,7 +1406,7 @@ export class ChimbotePortScene {
 
   // ── Raycast de cajas bajo la mira ─────────────────────────────────────────
   #updateAim() {
-    if (!this.controls.isLocked || !this.activo) { this.#setAim(null); return; }
+    if (!this.#enJuego() || !this.activo) { this.#setAim(null); return; }
     this.ray.setFromCamera({ x: 0, y: 0 }, this.camera);
     const hits = this.ray.intersectObjects(this.activo.crates.map((c) => c.mesh), true);
     let o = hits.length ? hits[0].object : null;
@@ -1056,7 +1420,9 @@ export class ChimbotePortScene {
     this.aimCrate = cr;
     if (cr && !cr.abierta) {
       cr.mat.emissive.setHex(0x554400); // resalte del cajón bajo la mira
-      this.$prompt.innerHTML = '<kbd>Clic</kbd> abrir con palanca · <kbd>X</kbd> rayos X';
+      this.$prompt.innerHTML = isTouch
+        ? '<kbd>TOCA</kbd> abrir con palanca · <kbd>📟</kbd> rayos X'
+        : '<kbd>Clic</kbd> abrir con palanca · <kbd>X</kbd> rayos X';
       this.$prompt.classList.remove('hidden');
     } else {
       this.$prompt.classList.add('hidden');
@@ -1067,23 +1433,32 @@ export class ChimbotePortScene {
   #loop() {
     const tick = () => {
       this._raf = requestAnimationFrame(tick);
-      const dt = Math.min(this.clock.getDelta(), 0.05);
+      // El hit-stop escala el tiempo del juego: un impacto CONGELA el mundo
+      // unos ms y por eso se siente sólido (la cámara sigue sacudiéndose).
+      const dtReal = Math.min(this.clock.getDelta(), 0.05);
+      this.perf.update(dtReal);
+      // En pausa el mundo se congela pero se SIGUE renderizando (parar el rAF
+      // deja una imagen muerta y rompe las transiciones de GSAP).
+      const dt = this.pausado ? 0 : this.hitStop.escala(dtReal);
       const t = this.clock.elapsedTime;
 
       this.#move();
-      this.grounded = false;
       this.world.step(1 / 60, dt, 3);
+      this.#actualizarGrounded(); // tras el step: contactos reales, no eventos
       const p = this.playerBody.position;
       this.camera.position.set(p.x, p.y + EYE_OFF, p.z);
 
       this.waterMat.uniforms.uTime.value = t;
+      if (!this.pausado) this.puerto?.update(t); // fauna, humo y bandera
 
       // ¿Dentro de un contenedor abierto? → linterna + barra de decisión.
       this.activo = this.#dentro();
       this.flashTarget = this.activo ? 14 : 0;
       this.flash.intensity += (this.flashTarget - this.flash.intensity) * Math.min(1, dt * 6);
       if (this.activo && !this.activo.caso.resuelto) {
-        this.$hint.innerHTML = 'Abre las cajas y decide: <b><kbd>F</kbd> decomisar</b> · <b><kbd>G</kbd> liberar</b>';
+        this.$hint.innerHTML = isTouch
+          ? 'Abre las cajas y decide: <b>🚫 decomisar</b> · <b>✅ liberar</b>'
+          : 'Abre las cajas y decide: <b><kbd>F</kbd> decomisar</b> · <b><kbd>G</kbd> liberar</b>';
         this.$hint.classList.remove('hidden');
       } else if (!this.activo) {
         this.$hint.classList.add('hidden');
@@ -1104,17 +1479,19 @@ export class ChimbotePortScene {
       else this.alarmLight.intensity = 0;
 
       // Prompt de "abrir contenedor" cuando estoy cerca de uno cerrado y sin apuntar caja.
-      if (this.controls.isLocked && !this.aimCrate && this.#contenedorCercano()) {
-        this.$prompt.innerHTML = '<kbd>E</kbd> Abrir contenedor';
+      if (this.#enJuego() && !this.aimCrate && this.#contenedorCercano()) {
+        this.$prompt.innerHTML = isTouch ? '<kbd>🚪</kbd> Abrir contenedor' : '<kbd>E</kbd> Abrir contenedor';
         this.$prompt.classList.remove('hidden');
       } else if (!this.aimCrate) {
         this.$prompt.classList.add('hidden');
       }
 
       for (const n of this.npcs) {
-        n.body.scale.y = 1 + Math.sin(t * 1.6 + n.phase) * 0.02;
-        n.googly.update(dt, t + n.phase);
+        if (n.body) n.body.scale.y = 1 + Math.sin(t * 1.6 + n.phase) * 0.02;
+        n.googly?.update(dt, t + n.phase);
+        n.rig?.update(dt);
       }
+      this.squadRigs?.forEach((r) => r.update(dt));
 
       // Fauna viva: no está tiesa — salta, se gira nerviosa y aletea.
       for (const a of this.animals) {
@@ -1124,7 +1501,11 @@ export class ChimbotePortScene {
         a.googly.update(dt, t + a.phase);
       }
 
-      this.renderer.render(this.scene, this.camera);
+      // Sacudida: se aplica, se renderiza y se DESHACE — así la posición real
+      // de la cámara sigue limpia para raycasts y cálculos de proximidad.
+      this.shake.apply(dtReal);
+      this.post.render();
+      this.shake.revert();
     };
     tick();
   }

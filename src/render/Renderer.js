@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CinematicPass } from './CinematicPass.js';
+import { quality } from '../core/Device.js';
 
 /**
  * Renderer — la sala de proyección.
@@ -20,13 +21,16 @@ export class Renderer {
 
     this.gl = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: quality.antialias,
       powerPreference: 'high-performance',
     });
-    this.gl.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // El aeropuerto ignoraba el presupuesto móvil (ADR-008): pixelRatio 1.5 fijo
+    // y sombras suaves aunque fuera un teléfono. Ahora respeta el mismo techo
+    // que los demás niveles.
+    this.gl.setPixelRatio(quality.pixelRatio);
     this.gl.setSize(window.innerWidth, window.innerHeight);
     this.gl.shadowMap.enabled = true;
-    this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.gl.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.2; // cartoon luminoso (ADR-004): el mundo sonríe
 
@@ -38,6 +42,8 @@ export class Renderer {
       aperture: 0.00022,
       maxblur: 0.008,
     });
+    // El DOF es la pasada más cara de la cadena: en móvil nace apagada.
+    this.bokeh.enabled = !quality.mobile;
     this.composer.addPass(this.bokeh);
 
     this.bloom = new UnrealBloomPass(

@@ -230,6 +230,16 @@ export class AudioEngine {
     );
   }
 
+  /** Volumen general 0..1 (lo controla el menú de pausa, ADR-010). */
+  setVolumen(v) {
+    if (!this.started) return;
+    this.volumen = Math.max(0, Math.min(1, v));
+    // El compresor maestro no tiene ganancia propia: se modulan los dos buses.
+    const t = this.ctx.currentTime + 0.05;
+    this.worldGain.gain.linearRampToValueAtTime(this.volumen, t);
+    this.dramaGain.gain.linearRampToValueAtTime(this.volumen, t);
+  }
+
   /** Foco acústico: 'mundo' (todo abierto) · 'closeup' (interrogatorio) · 'monitor' (rayos X). */
   setFocus(modo) {
     if (!this.started) return;
@@ -551,6 +561,147 @@ export class AudioEngine {
       o.connect(g2).connect(this.dramaGain);
       o.start(t2); o.stop(t2 + 0.32);
     }, 650);
+  }
+
+  // ── Nivel 3 · Operativo Trafasport (ADR-007) ──────────────────────────────
+  /** Arranque mínimo para escenas narrativas: solo buses + latido. */
+  startRaid() {
+    if (this.started) return;
+    this.started = true;
+    this.#initBuses();
+    this.#startHeartbeat();
+  }
+
+  /**
+   * Música dinámica del raid: 'tienda' (muzak aburrido de galería) ·
+   * 'persecucion' (pulso frenético + sirena) · null (silencio).
+   */
+  musica(modo) {
+    if (!this.started) return;
+    // Apagar la capa anterior.
+    if (this.musicaNodes) {
+      const { oscs, gain } = this.musicaNodes;
+      gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.6);
+      for (const o of oscs) { try { o.stop(this.ctx.currentTime + 0.7); } catch { /* ya parado */ } }
+      clearInterval(this.musicaTimer);
+      this.musicaNodes = null;
+    }
+    if (!modo) return;
+    const ctx = this.ctx;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.gain.linearRampToValueAtTime(modo === 'tienda' ? 0.045 : 0.08, ctx.currentTime + 0.8);
+    gain.connect(this.worldFilter);
+    const oscs = [];
+
+    if (modo === 'tienda') {
+      // Muzak: arpegio suave y repetitivo de tienda de galería (triángulo, lento).
+      const notas = [261.6, 329.6, 392.0, 329.6, 293.7, 392.0, 349.2, 293.7];
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.connect(gain);
+      o.start();
+      oscs.push(o);
+      let i = 0;
+      this.musicaTimer = setInterval(() => {
+        if (ctx.state === 'closed') return;
+        o.frequency.setTargetAtTime(notas[i % notas.length], ctx.currentTime, 0.04);
+        i++;
+      }, 460);
+    } else {
+      // Persecución: bajo pulsante frenético + sirena bitonal.
+      const bajo = ctx.createOscillator();
+      bajo.type = 'sawtooth';
+      bajo.frequency.value = 55;
+      const bajoGain = ctx.createGain();
+      bajoGain.gain.value = 0.9;
+      bajo.connect(bajoGain).connect(gain);
+      bajo.start();
+      const sirena = ctx.createOscillator();
+      sirena.type = 'square';
+      sirena.frequency.value = 660;
+      const sirenaGain = ctx.createGain();
+      sirenaGain.gain.value = 0.16;
+      sirena.connect(sirenaGain).connect(gain);
+      sirena.start();
+      oscs.push(bajo, sirena);
+      let beat = 0;
+      this.musicaTimer = setInterval(() => {
+        if (ctx.state === 'closed') return;
+        const t = ctx.currentTime;
+        bajoGain.gain.setValueAtTime(1, t);
+        bajoGain.gain.exponentialRampToValueAtTime(0.25, t + 0.1);
+        bajo.frequency.setValueAtTime(beat % 4 === 3 ? 73.4 : 55, t);
+        sirena.frequency.setTargetAtTime(beat % 2 ? 660 : 880, t, 0.05);
+        beat++;
+      }, 140);
+    }
+    this.musicaNodes = { oscs, gain };
+  }
+
+  /** Cristales rotos: lluvia de clinks agudos + estallido de ruido. */
+  vidrios() {
+    if (!this.started) return;
+    this.#burst({ dur: 0.25, type: 'highpass', freq: 3000, gain: 0.22, drama: true });
+    for (let i = 0; i < 9; i++) {
+      setTimeout(() => {
+        const t = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        o.frequency.value = 2400 + Math.random() * 3200;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.05, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+        o.connect(g).connect(this.dramaGain);
+        o.start(t); o.stop(t + 0.14);
+      }, 40 + i * 55 + Math.random() * 40);
+    }
+  }
+
+  /** Tos del narrador (cuando el jugador mete la pata). */
+  tos() {
+    if (!this.started) return;
+    for (const [delay, dur] of [[0, 0.09], [160, 0.12]]) {
+      setTimeout(() => this.#burst({ dur, type: 'bandpass', freq: 420, q: 1.2, gain: 0.16, drama: true }), delay);
+    }
+  }
+
+  /** Ladrido FELIZ de Justus (dos ladridos brillantes, nada de gruñido). */
+  ladridoFeliz() {
+    if (!this.started) return;
+    const t0 = this.ctx.currentTime;
+    for (const dt of [0, 0.28]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(420, t0 + dt);
+      o.frequency.exponentialRampToValueAtTime(760, t0 + dt + 0.06);
+      o.frequency.exponentialRampToValueAtTime(300, t0 + dt + 0.16);
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'lowpass'; f.frequency.value = 1400;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.14, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + dt + 0.18);
+      o.connect(f).connect(g).connect(this.dramaGain);
+      o.start(t0 + dt); o.stop(t0 + dt + 0.2);
+    }
+  }
+
+  /** Sonido "químico": burbujeo agudo inquietante (pegamento tóxico). */
+  quimico() {
+    if (!this.started) return;
+    for (let i = 0; i < 6; i++) {
+      setTimeout(() => {
+        const t = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(900 + Math.random() * 900, t);
+        o.frequency.exponentialRampToValueAtTime(300 + Math.random() * 200, t + 0.09);
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.05, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        o.connect(g).connect(this.dramaGain);
+        o.start(t); o.stop(t + 0.12);
+      }, i * 70);
+    }
   }
 
   /** Chillido de ave/animal exótico: graznidos ásperos con pitch rugoso. */
