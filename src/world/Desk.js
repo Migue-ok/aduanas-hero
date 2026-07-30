@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import gsap from 'gsap';
+import { colgarEntorno } from '../render/Entorno.js';
+import { disposeObject } from '../core/Disposal.js';
 
 /**
  * Desk — el mostrador es un lugar físico, no un menú.
@@ -63,13 +65,15 @@ export class Desk {
   // ── El expediente (donde cae el sello) ──────────────────────────────────
   #buildExpediente() {
     const tex = this.#makeFolderTexture();
+    // El expediente es lo ÚNICO del mostrador que no se pule: una cartulina que
+    // refleje el techo deja de leerse como papel. Se queda mate a propósito.
+    // El canto es un solo material compartido por las cinco caras restantes (el
+    // `.map(m => m ?? new Material())` de antes creaba cinco idénticos).
+    const canto = new THREE.MeshStandardMaterial({ color: 0xb8a06a, roughness: 0.9 });
+    const cara = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 });
     this.expediente = new THREE.Mesh(
       new THREE.BoxGeometry(0.34, 0.008, 0.46),
-      [
-        undefined, undefined,
-        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 }), // cara superior
-        undefined, undefined, undefined,
-      ].map((m) => m ?? new THREE.MeshStandardMaterial({ color: 0xb8a06a, roughness: 0.9 })),
+      [canto, canto, cara, canto, canto, canto], // +x −x +y(superior) −y +z −z
     );
     this.expediente.position.set(0.3, DESK_Y + 0.006, 0.62);
     this.expediente.rotation.y = -0.06;
@@ -100,28 +104,48 @@ export class Desk {
   // ── Los 4 sellos en su riel ─────────────────────────────────────────────
   #buildStamps() {
     this.stamps = new Map();
+    // El riel y las bases de los sellos son el metal real del puesto: se les
+    // cuelga el entorno de la terminal para que devuelvan los fluorescentes en
+    // vez de ser dos manchas oscuras (ver `render/Entorno.js`).
     const rail = new THREE.Mesh(
       new THREE.BoxGeometry(0.62, 0.02, 0.14),
-      new THREE.MeshStandardMaterial({ color: 0x1e2126, roughness: 0.4, metalness: 0.6 }),
+      colgarEntorno(
+        new THREE.MeshStandardMaterial({ color: 0x1e2126, roughness: 0.32, metalness: 0.6 }),
+        this.scene, 1.35,
+      ),
     );
     rail.position.set(0.62, DESK_Y + 0.01, 0.28);
     this.group.add(rail);
 
     SELLOS.forEach((def, i) => {
       const stamp = new THREE.Group();
+      // Mango de baquelita moldeada: plástico duro, brillo propio pero sin
+      // metalness — el color del sello tiene que seguir leyéndose de un vistazo
+      // (memoria muscular: verde·ámbar·rojo·azul), y un mango espejado lo mata.
       const handle = new THREE.Mesh(
         new THREE.CylinderGeometry(0.022, 0.03, 0.09, 12),
-        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.35 }),
+        colgarEntorno(
+          new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.28, metalness: 0 }),
+          this.scene, 1.35,
+        ),
       );
       handle.position.y = 0.075;
       const base = new THREE.Mesh(
         new THREE.BoxGeometry(0.075, 0.035, 0.075),
-        new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.3, metalness: 0.5 }),
+        colgarEntorno(
+          new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.26, metalness: 0.5 }),
+          this.scene, 1.35,
+        ),
       );
       base.position.y = 0.018;
+      // La sombra va en las MALLAS, no en el `Group`. Un Group nunca se
+      // renderiza, así que `stamp.castShadow = true` no proyectaba nada: los
+      // cuatro sellos flotaban sin contacto sobre el tablero justo en la vista
+      // SELLO, que es el plano icónico del juego.
+      handle.castShadow = base.castShadow = true;
+      base.receiveShadow = true;
       stamp.add(handle, base);
       stamp.position.set(0.42 + i * 0.135, DESK_Y + 0.02, 0.28);
-      stamp.castShadow = true;
       stamp.userData = { def, home: stamp.position.clone() };
       this.group.add(stamp);
       this.stamps.set(def.id, stamp);
@@ -130,9 +154,16 @@ export class Desk {
 
   #buildLoosePen() {
     // El lapicero suelto: la víctima favorita del golpe del sello.
+    // Plástico lacado negro, y encima RODANDO justo bajo el foco del puesto: es
+    // la pieza del mostrador donde un reflejo que se mueve más se nota. Sin el
+    // entorno colgado su `roughness: 0.3` no tenía nada que reflejar y quedaba
+    // como una línea negra plana rebotando por la mesa.
     const pen = new THREE.Mesh(
       new THREE.CylinderGeometry(0.006, 0.006, 0.15, 8),
-      new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.3 }),
+      colgarEntorno(
+        new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.3, metalness: 0 }),
+        this.scene, 1.35,
+      ),
     );
     pen.rotation.z = Math.PI / 2;
     pen.castShadow = true;
@@ -144,12 +175,20 @@ export class Desk {
   tossPassport() {
     if (this.passportPair) {
       this.world.removeBody(this.passportPair.body);
-      this.group.remove(this.passportPair.mesh);
+      // Mismo caso que los decals: el pasaporte del pasajero anterior sale del
+      // grafo pero su geometría y su material se quedaban en VRAM. Es uno por
+      // pasajero, así que crece al mismo ritmo que la cola.
+      disposeObject(this.passportPair.mesh);
       this.dynamic = this.dynamic.filter((d) => d !== this.passportPair);
     }
+    // Tapa de cuero granulado: mate al tacto pero con lustre de uso. Es lo
+    // primero que el pasajero pone sobre el tablero, y cae justo bajo el foco.
     const pass = new THREE.Mesh(
       new THREE.BoxGeometry(0.09, 0.012, 0.125),
-      new THREE.MeshStandardMaterial({ color: 0x7a1f24, roughness: 0.7 }),
+      colgarEntorno(
+        new THREE.MeshStandardMaterial({ color: 0x7a1f24, roughness: 0.52, metalness: 0 }),
+        this.scene, 1.35,
+      ),
     );
     pass.castShadow = true;
     this.group.add(pass);
@@ -256,9 +295,20 @@ export class Desk {
     }
   }
 
-  /** Limpia el expediente para el siguiente pasajero. */
+  /**
+   * Limpia el expediente para el siguiente pasajero.
+   *
+   * Cada sello estampado deja un decal con SU PROPIA `CanvasTexture` de 256×128
+   * (la tinta es imperfecta y distinta cada vez: no se puede compartir) más su
+   * `PlaneGeometry` y su material. Con `group.remove()` la tinta desaparecía de
+   * la mesa y se quedaba entera en la tarjeta gráfica — un sello por pasajero,
+   * turno tras turno, sin que nada en pantalla delatara la cuenta.
+   */
   clearDecals() {
-    for (const d of this.decals) this.group.remove(d);
+    for (const d of this.decals) {
+      gsap.killTweensOf(d.scale); // el sangrado de tinta puede seguir en vuelo
+      disposeObject(d);
+    }
     this.decals = [];
   }
 

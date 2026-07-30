@@ -5,15 +5,19 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { spawnRig, loadModel, clearRigCache } from '../world/Rig.js';
 import { quality, isTouch, tuneRaycaster } from '../core/Device.js';
 import { TouchControls } from '../ui/TouchControls.js';
-import { CameraShake, HitStop, popIn, punch, flash } from '../core/Juice.js';
+import { CameraShake, HitStop, punch, flash } from '../core/Juice.js';
 import { PostFX } from '../render/PostFX.js';
 import { PauseMenu } from '../ui/PauseMenu.js';
-import { PerfGuard } from '../core/PerfGuard.js';
-import { disposeScene, disposeObject } from '../core/Disposal.js';
+import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.js';
+import { disposeObject, cerrarNivel } from '../core/Disposal.js';
+import { hornearEntorno } from '../render/Entorno.js';
 import { bus, Señal } from '../core/EventBus.js';
 import { audio } from '../audio/AudioEngine.js';
 import { narrator } from '../audio/Narrator.js';
 import { makeGooglyEyes } from '../world/GooglyEyes.js';
+import { coach } from '../ui/JustusCoach.js';
+import { Motas } from '../world/Motas.js';
+import { abrirHidden, cerrarHidden, abrirVelo, cerrarVelo, cascada } from '../ui/Paneles.js';
 
 /**
  * TrafasportRaidScene (ADR-007) — Nivel 3: "Operativo Trafasport".
@@ -42,6 +46,42 @@ import { makeGooglyEyes } from '../world/GooglyEyes.js';
 
 const PASILLO = 60;    // largo de la galería (z)
 const ANCHO = 10;      // ancho del pasillo
+
+/**
+ * La guía de Justus, fase por fase (Fase 2 del plan de mejora).
+ * El raid ya tiene su cinta de OBJETIVO, pero es una orden, no una explicación:
+ * dice QUÉ hacer, no CÓMO. Justus se adelanta un latido y enseña el gesto — y en
+ * la fase 1, donde el jugador ES Justus, habla como la voz de su propio instinto.
+ * Cada lección se recuerda: en la segunda partida no vuelve a interrumpir.
+ */
+const leccionRaid = (touch) => ({
+  1: [{
+    txt: touch
+      ? 'Esta vez el que trabaja soy yo, jefe. Muéveme con el JOYSTICK de la izquierda y MANTÉN pulsado el botón 👃 para entrar en MODO OLFATO: el mundo se apaga y el rastro de pegamento se enciende en verde. Sígalo hasta la puerta.'
+      : 'Esta vez el que trabaja soy yo, jefe. Muéveme con W-A-S-D y MANTÉN la barra espaciadora para entrar en MODO OLFATO: el mundo se apaga y el rastro de pegamento se enciende en verde. Sígalo hasta la puerta.',
+    foco: touch ? '.tp-btn' : null,
+  }],
+  2: [{
+    txt: touch
+      ? 'Doscientas cajas encima de la evidencia y quince segundos. No las levante una a una: APOYE EL DEDO y BARRA la pila de lado a lado — todo lo que roce sale volando.'
+      : 'Doscientas cajas encima de la evidencia y quince segundos. No las levante una a una: MANTENGA EL CLIC y BARRA la pila de lado a lado — todo lo que roce sale volando.',
+  }],
+  3: [{
+    txt: touch
+      ? 'Corre más que usted, así que no intente alcanzarlo: LIMPIE EL CAMINO. Agarre cada obstáculo en pleno vuelo y láncelo a los costados.'
+      : 'Corre más que usted, así que no intente alcanzarlo: LIMPIE EL CAMINO. Agarre cada obstáculo en pleno vuelo con el ratón y láncelo a los costados.',
+  }],
+  4: [{
+    txt: touch
+      ? 'Ya lo tiene. Ahora aguante: APOYE el dedo encima y ARRASTRE HACIA ABAJO sin soltar. Él va a tirar en contra — usted tire más fuerte, hasta el círculo.'
+      : 'Ya lo tiene. Ahora aguante: CLIC SOSTENIDO encima y ARRASTRE HACIA ABAJO. Él va a tirar en contra — usted tire más fuerte, hasta el círculo.',
+  }],
+  5: [{
+    txt: touch
+      ? 'Última parte, y es la que importa. Su DEDO lleva una LUPA: mire por encima de él. ARRASTRE para girar la zapatilla y TOQUE las tres pruebas — etiqueta falsa, pegamento tóxico y el cartel de "no damos boleta".'
+      : 'Última parte, y es la que importa. Su CURSOR es una LUPA. ARRASTRE para girar la zapatilla y haga CLIC en las tres pruebas — etiqueta falsa, pegamento tóxico y el cartel de "no damos boleta".',
+  }],
+});
 
 export class TrafasportRaidScene {
   constructor({ onExit } = {}) {
@@ -102,17 +142,22 @@ export class TrafasportRaidScene {
     });
     this.pausa.mount();
 
+    // Mismo criterio que en el muelle: primero lo que más frames devuelve, y
+    // los escalones que en este dispositivo no aplican devuelven `false` para
+    // no consumir una ventana de espera sin recortar nada.
     this.perf = new PerfGuard([
-      { nombre: 'bloom off', aplicar: () => { if (this.post.bloom) this.post.bloom.enabled = false; } },
-      { nombre: 'polvo ambiental off', aplicar: () => { if (this.motas) this.motas.visible = false; } },
-      { nombre: 'sombras off', aplicar: () => {
-        const sun = this.scene.children.find((o) => o.isDirectionalLight);
-        if (sun) sun.castShadow = false;
+      recorteRatioPixel(this.renderer, this.post),
+      { nombre: 'bloom off', aplicar: () => {
+        if (!this.post.bloom?.enabled) return false;
+        this.post.bloom.enabled = false;
+        return true;
       } },
-      { nombre: 'pixelRatio 1', aplicar: () => {
-        this.renderer.setPixelRatio(1);
-        this.post.setSize(window.innerWidth, window.innerHeight);
+      { nombre: 'polvo ambiental off', aplicar: () => {
+        if (!this.motas?.visible) return false;
+        this.motas.visible = false;
+        return true;
       } },
+      recorteSombras(() => this.scene.children.filter((o) => o.isDirectionalLight)),
     ]);
 
     this.clock = new THREE.Clock();
@@ -121,8 +166,16 @@ export class TrafasportRaidScene {
   }
 
   unmount() {
+    // Marca de defunción. El raid carga medio mundo de forma asíncrona (HDRI,
+    // piso PBR, cinco rigs de KayKit) y esas promesas siguen vivas después de
+    // salir: sin esta bandera terminan añadiendo mallas y horneando entornos
+    // sobre una escena que ya nadie va a renderizar ni a liberar. Aquí NO se
+    // pone `this.scene = null` a propósito — media docena de `.then()` la usan
+    // sin preguntar, y quedarían convertidos en TypeError.
+    this._muerto = true;
     if (this._raf) cancelAnimationFrame(this._raf);
     for (const t of this._timers) clearTimeout(t);
+    coach.destroy();
     narrator.callar();
     audio.musica(null);
     window.removeEventListener('resize', this._bound.resize);
@@ -136,15 +189,25 @@ export class TrafasportRaidScene {
     this.pad?.destroy();
     this.overlay?.remove();
     this._styleEl?.remove();
-    // Liberación real de VRAM (ADR-009): escena + render target + caché de rigs.
-    disposeScene(this.scene);
-    disposeScene(this.trailScene);
-    this.post?.dispose();
+    // Liberación real de VRAM (ADR-009): las DOS escenas (el mundo y la del
+    // humo del olfato), el post-proceso y la caché de rigs. `cerrarNivel` fija
+    // el orden y mide el residuo; la caché de rigs se vacía antes que él porque
+    // nada debe liberarse después del renderer (ver `disposeRenderer`).
     clearRigCache();
-    this.renderer?.dispose();
+    cerrarNivel(this.renderer, {
+      escenas: [this.scene, this.trailScene],
+      post: this.post,
+      etiqueta: 'raid Trafasport',
+    });
   }
 
-  #later(fn, ms) { this._timers.push(setTimeout(fn, ms)); }
+  /** Temporizador que el `unmount` sabe cancelar. Devuelve el id por si además
+   *  hay que cancelarlo antes de tiempo (el subtítulo se pisa a sí mismo). */
+  #later(fn, ms) {
+    const id = setTimeout(fn, ms);
+    this._timers.push(id);
+    return id;
+  }
 
   /**
    * Post-proceso (ADR-009 fase 2). Antes esto era un render target + un quad a
@@ -158,7 +221,8 @@ export class TrafasportRaidScene {
       scene: this.scene,
       camera: this.camera,
       overlay: this.trailScene,
-      bloom: 0.32, // afinado en pantalla
+      bloom: 0.46, // subido con la rodilla suave del umbral: el humo verde neón
+                   // del modo olfato irradia sin que el suelo de la galería se queme
     });
   }
 
@@ -248,43 +312,24 @@ export class TrafasportRaidScene {
   }
 
   /**
-   * Motas de polvo suspendidas en los haces de luz de la galería. Un solo
-   * BufferGeometry + un material: coste casi nulo, pero el espacio deja de
-   * parecer una maqueta de arquitecto y empieza a tener AIRE.
+   * Motas de polvo suspendidas en los haces de luz de la galería.
+   *
+   * Migrado al sistema compartido `world/Motas.js`. La versión anterior era
+   * correcta pero cara donde más duele: reescribía las 420 posiciones en CPU y
+   * volvía a subir el buffer entero CADA FRAME, en la escena más pesada del
+   * juego. Ahora la deriva vive en el vertex shader y el bucle solo asigna un
+   * uniform. Mismo aire, coste por frame prácticamente cero.
    */
   #buildPolvoAmbiental() {
-    const N = quality.mobile ? 180 : 420;
-    const pos = new Float32Array(N * 3);
-    this._motasBase = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-      const x = (Math.random() - 0.5) * (ANCHO + 4);
-      const y = 0.2 + Math.random() * 3.6;
-      const z = -Math.random() * (PASILLO + 4);
-      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
-      this._motasBase[i * 3] = x; this._motasBase[i * 3 + 1] = y; this._motasBase[i * 3 + 2] = z;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.motas = new THREE.Points(geo, new THREE.PointsMaterial({
-      color: 0xfff0d8, size: 0.035, transparent: true, opacity: 0.5,
-      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-    }));
-    this.scene.add(this.motas);
+    this.polvo = new Motas(this.scene, {
+      centro: new THREE.Vector3(0, 2.1, -(PASILLO + 4) / 2),
+      ancho: ANCHO + 4, alto: 3.8, fondo: PASILLO + 4,
+      color: 0xfff0d8, opacidad: 0.22, tam: 9,
+    });
+    this.motas = this.polvo.points; // el PerfGuard lo apaga con `.visible`
   }
 
-  /** Deriva lenta del polvo: sube, ondula y reaparece por abajo. */
-  #updatePolvo(t) {
-    if (!this.motas) return;
-    const a = this.motas.geometry.attributes.position;
-    const base = this._motasBase;
-    for (let i = 0; i < a.count; i++) {
-      const bx = base[i * 3]; const by = base[i * 3 + 1]; const bz = base[i * 3 + 2];
-      a.array[i * 3] = bx + Math.sin(t * 0.25 + bz) * 0.34;
-      a.array[i * 3 + 1] = 0.2 + ((by - 0.2 + t * 0.11) % 3.6); // ascenso continuo
-      a.array[i * 3 + 2] = bz + Math.cos(t * 0.2 + bx) * 0.26;
-    }
-    a.needsUpdate = true;
-  }
+  #updatePolvo(t) { this.polvo?.update(0, t); }
 
   /** Rastro de pegamento: humo de partículas verde neón animado con ruido. */
   #buildTrail() {
@@ -296,18 +341,34 @@ export class TrafasportRaidScene {
       new THREE.Vector3(-1.5, 0.35, -42),
       new THREE.Vector3(0, 0.4, -PASILLO - 1.2),
     ]);
-    const N = quality.particulasOlfato; // 900 en PC · 350 en móvil
+    const N = quality.particulasOlfato;
     const pos = new Float32Array(N * 3);
-    this.trailSeed = new Float32Array(N * 2);
+    const semilla = new Float32Array(N * 2);
+    const fase = new Float32Array(N);
+    const escala = new Float32Array(N);
     for (let i = 0; i < N; i++) {
-      const p = this.trailCurve.getPoint(i / N);
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
-      this.trailSeed[i * 2] = Math.random() * 10;
-      this.trailSeed[i * 2 + 1] = Math.random() * 10;
+      // Reparto a lo largo de la curva con dispersión lateral: un rastro real no
+      // es una línea de un píxel, es una franja de olor de medio metro de ancho.
+      // El parámetro va ACOTADO a [0,1]: `CatmullRomCurve3.getPoint` no valida y
+      // con un valor fuera de rango indexa puntos inexistentes y lanza.
+      const u = THREE.MathUtils.clamp((i / N) + (Math.random() - 0.5) * (0.5 / N), 0, 1);
+      const p = this.trailCurve.getPoint(u);
+      pos[i * 3] = p.x + (Math.random() - 0.5) * 0.55;
+      pos[i * 3 + 1] = p.y;
+      pos[i * 3 + 2] = p.z + (Math.random() - 0.5) * 0.55;
+      semilla[i * 2] = Math.random() * 10;
+      semilla[i * 2 + 1] = Math.random() * 10;
+      fase[i] = Math.random();                       // desfase del ciclo de vida
+      escala[i] = 0.55 + Math.random() ** 2 * 1.3;   // muchas finas, pocas gordas
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.trailBase = pos.slice();
+    geo.setAttribute('aSemilla', new THREE.BufferAttribute(semilla, 2));
+    geo.setAttribute('aFase', new THREE.BufferAttribute(fase, 1));
+    geo.setAttribute('aEscala', new THREE.BufferAttribute(escala, 1));
+    // Las partículas se desplazan en el shader; sin esta esfera generosa el
+    // frustum culling apagaría el penacho entero al mirar de reojo.
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -PASILLO / 2), PASILLO);
     // El humo vive en una ESCENA APARTE: se dibuja ENCIMA del filtro gris para
     // que el verde neón arda mientras el mundo está en blanco y negro.
     this.trailScene = new THREE.Scene();
@@ -317,28 +378,90 @@ export class TrafasportRaidScene {
     cv.width = cv.height = 64;
     const g2 = cv.getContext('2d');
     const grd = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
-    grd.addColorStop(0.0, 'rgba(255,255,255,1)');
-    grd.addColorStop(0.25, 'rgba(120,255,150,0.95)');
-    grd.addColorStop(0.6, 'rgba(57,255,106,0.35)');
+    // El núcleo NO es blanco puro. Con 1500 partículas aditivas superpuestas a
+    // lo largo del pasillo, un centro blanco satura a blanco puro y el rastro
+    // pierde justo lo que lo identifica: que es VERDE. Partiendo de un verde
+    // muy claro, la acumulación satura hacia verde neón en vez de hacia nada.
+    grd.addColorStop(0.0, 'rgba(198,255,214,1)');
+    grd.addColorStop(0.25, 'rgba(110,255,145,0.92)');
+    grd.addColorStop(0.6, 'rgba(57,255,106,0.34)');
     grd.addColorStop(1.0, 'rgba(57,255,106,0)');
     g2.fillStyle = grd;
     g2.fillRect(0, 0, 64, 64);
     const halo = new THREE.CanvasTexture(cv);
     halo.colorSpace = THREE.SRGBColorSpace;
 
-    this.trail = new THREE.Points(geo, new THREE.PointsMaterial({
-      // Nace APAGADO: la cadena de post-proceso compone el humo siempre, así que
-      // su visibilidad la manda la opacidad (atada al modo olfato).
-      // BUG CORREGIDO: con size 0.14 el rastro medía ~3 px en pantalla de móvil
-      // y el verde aditivo desaparecía sobre el suelo claro. Ahora es grande,
-      // texturado y con un tamaño MÍNIMO garantizado en pantalla.
-      map: halo,
-      color: 0x8dffb0,
-      size: quality.mobile ? 0.62 : 0.42,
-      transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-      sizeAttenuation: true,
-    }));
+    /**
+     * El rastro dejó de ser una cinta de puntos que tiembla en el sitio.
+     *
+     * Antes: 900 posiciones reescritas en CPU y subidas enteras CADA FRAME
+     * mientras el jugador mantuviera el olfato — y con todas las motas quietas
+     * a ras de suelo, así que se leía como una guirnalda, no como un olor.
+     *
+     * Ahora cada partícula tiene un CICLO DE VIDA propio en el vertex shader:
+     * nace pegada al suelo, asciende, se expande y se disipa, y vuelve a nacer.
+     * Como cada una lleva su desfase, el conjunto es una columna de humo en
+     * movimiento perpetuo. La CPU no toca un solo vértice: solo `uTime`.
+     */
+    this.trailMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uOpacidad: { value: 0 },   // atada al modo olfato
+        uMapa: { value: halo },
+        uTam: { value: quality.mobile ? 0.9 : 0.62 },
+        uAlturaPx: { value: window.innerHeight },
+        uPixelMin: { value: quality.mobile ? 10 : 6 }, // en móvil, 3 px no se ve
+      },
+      vertexShader: /* glsl */`
+        uniform float uTime, uTam, uAlturaPx, uPixelMin;
+        attribute vec2 aSemilla;
+        attribute float aFase;
+        attribute float aEscala;
+        varying float vVida;
+
+        void main() {
+          // Ciclo 0..1 desfasado por partícula: el penacho nunca "late" a la vez.
+          float vida = fract(uTime * 0.26 + aFase);
+          float s = aSemilla.x;
+          float s2 = aSemilla.y;
+
+          vec3 p = position;
+          // Turbulencia: capas de senos desincronizados (Perlin de pobre, pero
+          // convincente y de coste nulo).
+          p.x += sin(uTime * 1.7 + s) * 0.16 + sin(uTime * 3.1 + s2) * 0.07;
+          p.z += cos(uTime * 1.3 + s2) * 0.11;
+          // Ascenso: el olor sube y se abre en abanico a medida que se enfría.
+          p.y += 0.06 + vida * (0.85 + s * 0.05);
+          p.x += vida * sin(s * 7.0) * 0.42;
+          p.z += vida * cos(s2 * 5.0) * 0.36;
+
+          vVida = vida;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          // Se expande al subir: una bocanada joven es densa y una vieja, ancha.
+          float tam = uTam * aEscala * (0.5 + vida * 1.6);
+          // Misma fórmula que el sizeAttenuation de Three, con suelo mínimo.
+          gl_PointSize = max(uPixelMin, tam * (uAlturaPx * 0.5) / max(0.4, -mv.z));
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D uMapa;
+        uniform float uOpacidad;
+        varying float vVida;
+
+        void main() {
+          vec4 t = texture2D(uMapa, gl_PointCoord);
+          // Aparece de golpe y se disipa despacio: así se comporta el humo.
+          float fade = smoothstep(0.0, 0.10, vVida) * (1.0 - smoothstep(0.40, 1.0, vVida));
+          gl_FragColor = vec4(t.rgb, t.a * fade * uOpacidad);
+        }`,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    });
+
+    this.trail = new THREE.Points(geo, this.trailMat);
+    this.trail.frustumCulled = false;
     this.trailScene.add(this.trail);
   }
 
@@ -432,9 +555,15 @@ export class TrafasportRaidScene {
   #loadAssets() {
     // 1) Iluminación de imagen real (Poly Haven): mejora TODOS los materiales.
     new RGBELoader().load('/hdri/galeria.hdr', (hdr) => {
+      // Si el operativo ya se cerró mientras el HDRI viajaba (pesa ~1 MB), esto
+      // horneaba un PMREM sobre una escena muerta que nadie iba a liberar.
+      if (this._muerto) { hdr.dispose(); return; }
       hdr.mapping = THREE.EquirectangularReflectionMapping;
-      this.scene.environment = hdr;
-      this.scene.environmentIntensity = 0.6;
+      // Horneado propio, no el perezoso del renderer: el generador nace y muere
+      // dentro de `hornearEntorno`, mientras liberarlo todavía sirve de algo
+      // (ver la nota larga en `render/Entorno.js`). Aquí el HDRI solo ilumina;
+      // el cielo de la galería es el color plano que ya tenía la escena.
+      hornearEntorno(this.scene, this.renderer, hdr, { intensidad: 0.6 });
     });
     // 2) Piso PBR de galería (baldosas ambientCG con normal y roughness).
     const tl = new THREE.TextureLoader();
@@ -457,6 +586,8 @@ export class TrafasportRaidScene {
         // Un vendedor no va armado: fuera cuchillos y ballestas del pack.
         if (/knife|crossbow/i.test(o.name)) o.visible = false;
       });
+      // Liberar antes de desenganchar: ver la nota de `#swapRig`.
+      for (const hijo of [...this.vendedor.children]) disposeObject(hijo);
       this.vendedor.clear();
       this.googlyVendedor = null; // el modelo trae su propia cara cartoon
       model.scale.setScalar(0.95);
@@ -474,6 +605,8 @@ export class TrafasportRaidScene {
       .then((rig) => this.#swapRig('mama', rig));
     spawnRig('/models/Mateo.glb', { targetHeight: 1.05 }).then((rig) => this.#swapRig('mateo', rig));
     spawnRig('/models/Justus.glb', { targetHeight: 0.8, tint: 0xcf9a5f }).then((rig) => {
+      // Liberar antes de desenganchar: ver la nota de `#swapRig`.
+      for (const hijo of [...this.justus.children]) disposeObject(hijo);
       this.justus.clear();
       this.googlyJustus = null;
       this.colaJustus = null;
@@ -514,9 +647,19 @@ export class TrafasportRaidScene {
     return g;
   }
 
-  /** Sustituye un personaje googly por su rig (conserva grupo/posición). */
+  /**
+   * Sustituye un personaje googly por su rig (conserva grupo/posición).
+   *
+   * El `disposeObject` antes del `clear()` no es opcional: `clear()` solo
+   * DESENGANCHA a los hijos, y un personaje procedural desenganchado queda
+   * huérfano fuera del grafo de la escena — `disposeScene` ya no puede verlo, y
+   * su VRAM sobrevive al nivel entero. Como cada personaje son ~9 geometrías
+   * (cuerpo, cabeza y las cuatro esferas de los ojos googly, entre otras) y
+   * aquí pasan todos, era el mayor residuo del desmontaje.
+   */
   #swapRig(key, rig, anim = 'Idle') {
     const grupo = this[key];
+    for (const hijo of [...grupo.children]) disposeObject(hijo);
     grupo.clear();
     grupo.userData.googly = null;
     grupo.add(rig.model);
@@ -536,6 +679,18 @@ export class TrafasportRaidScene {
   }
 
   // ── HUD y subtítulos ──────────────────────────────────────────────────────
+  /**
+   * Nota sobre el marcado de abajo: la tarjeta `.rh-final-card` nace con
+   * `hidden`, igual que su velo, y NO es redundante. `abrirPanel` decide si
+   * anima mirando si la clase de ocultación estaba puesta (`ui/Paneles.js:45`);
+   * sin ella entra por la rama de refresco y el rebote del desenlace —el
+   * momento más cuidado del nivel— quedaba escrito pero no se ejecutaba jamás.
+   *
+   * Y un aviso para quien edite el HTML o el CSS de este método: son template
+   * literals. Un backtick dentro de un comentario, aunque sea un comentario
+   * HTML, cierra la cadena y rompe el build de Vite con un error de sintaxis a
+   * decenas de líneas de distancia. Los comentarios largos van aquí fuera.
+   */
   #buildHUD() {
     const el = document.createElement('div');
     el.id = 'raid-hud';
@@ -564,7 +719,7 @@ export class TrafasportRaidScene {
             : '🎧 Narrado por voz · WASD mover · ratón interactuar'}</p>
         </div>
       </div>
-      <div class="rh-final hidden"><div class="rh-final-card"></div></div>`;
+      <div class="rh-final hidden"><div class="rh-final-card hidden"></div></div>`;
     document.body.appendChild(el);
     this.overlay = el;
     this.$fase = el.querySelector('.rh-fase');
@@ -592,13 +747,21 @@ export class TrafasportRaidScene {
     el.querySelector('.rh-start-btn').addEventListener('click', () => {
       audio.startRaid();
       audio.musica('tienda');
-      this.$start.classList.add('hidden');
+      // La portada se retira por el sistema (`cerrarVelo`), no con `classList`:
+      // así el operativo no arranca con un corte seco y, sobre todo, el cierre
+      // queda protegido por su respaldo de temporizador — con la pestaña en
+      // segundo plano el tween no avanza y la portada se quedaba clavada encima
+      // del juego, tapando la fase 1 entera.
+      cerrarVelo(this.$start, { duration: 0.34 });
       this.arrancado = true;
       this.pad?.setVisible(true);
       this.#narra('Galería comercial "El Progreso", mediodía. Mateo quiere zapatillas nuevas. Su mamá encontró una oferta… demasiado buena. Justus ya olió el problema.', 0);
       this.#objetivo(isTouch
         ? 'FASE 1 · Eres JUSTUS. Mantén 👃 para OLER el rastro verde y guíalo con el joystick hasta la trastienda.'
         : 'FASE 1 · Eres JUSTUS. Mantén [ESPACIO] para OLER el rastro verde y síguelo con WASD hasta la trastienda.');
+      // La lección de la fase 1 espera AQUÍ, no en #startFase1: esa se ejecuta
+      // dentro de mount(), con la portada del operativo todavía en pantalla.
+      this.#guia(1, 5200);
     });
     this.#injectStyles();
   }
@@ -608,17 +771,29 @@ export class TrafasportRaidScene {
     this.#later(() => {
       narrator.decir(hablante, texto, { esNarrador: !hablante });
       this.$sub.innerHTML = hablante ? `<b>${hablante}:</b> ${texto}` : texto;
-      this.$sub.classList.remove('hidden');
-      popIn(this.$sub, { from: 24 });
+      // Apertura y cierre por el MISMO camino: si se abriera con `classList` a
+      // mano, el temporizador de un cierre aún en vuelo se llevaría por delante
+      // la frase recién puesta — y en el raid las frases se encadenan rápido.
+      abrirHidden(this.$sub, { y: 24, scale: 0.94, duration: 0.48, sfx: false });
+      // `_subT` va por `#later` como todo lo demás: si no, el temporizador
+      // sobrevive al desmontaje y dispara un cierre sobre un `$sub` ya sacado
+      // del DOM, que a su vez crea el suyo propio dentro de `Paneles`.
       clearTimeout(this._subT);
-      this._subT = setTimeout(() => this.$sub.classList.add('hidden'), Math.max(3200, texto.length * 65));
+      this._subT = this.#later(
+        () => cerrarHidden(this.$sub, { y: 14, duration: 0.26 }),
+        Math.max(3200, texto.length * 65),
+      );
     }, delayMs);
   }
 
   #objetivo(texto) {
     this.$obj.innerHTML = texto;
-    this.$obj.classList.remove('hidden');
-    popIn(this.$obj, { from: -14 }); // baja desde arriba con rebote
+    abrirHidden(this.$obj, { y: -14, scale: 0.94, duration: 0.46, sfx: false }); // baja desde arriba
+  }
+
+  /** Retira la cinta de objetivo: la orden ya está cumplida. */
+  #objetivoCumplido() {
+    cerrarHidden(this.$obj, { y: -10, duration: 0.24 });
   }
 
   /** El narrador tose y comenta cuando el jugador mete la pata. */
@@ -644,6 +819,18 @@ export class TrafasportRaidScene {
         padding: 14px 22px; font-family: Georgia, serif; font-size: 19px; font-style: italic; line-height: 1.5;
         border-radius: 4px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
       #raid-hud .rh-sub b { color: #e0c07a; font-style: normal; }
+      /* Mientras Justus da la clase ocupa el borde inferior: el subtítulo sube
+         para no quedar debajo de su tarjeta. La clase jc-guiando del body la
+         pone y la quita el propio JustusCoach: el HUD no sabe nada más. */
+      /* Solo la POSICIÓN se transiciona por CSS. La opacidad la lleva GSAP
+         desde ui/Paneles.js, y tenerla también aquí era una pelea de dos
+         motores por la misma propiedad: cada valor que escribía GSAP fotograma
+         a fotograma la hoja de estilos lo volvía a interpolar durante 300 ms,
+         y el subtítulo entraba blando y arrastraba al salir.
+         (Sin comillas invertidas en este comentario: va dentro de un template
+         literal de JS y cerrarían la cadena — rompe el build de Vite.) */
+      #raid-hud .rh-sub { transition: bottom .3s ease, top .3s ease; }
+      body.jc-guiando #raid-hud .rh-sub { bottom: 27%; }
       #raid-hud .rh-obj { position: absolute; left: 50%; top: 58px; transform: translateX(-50%);
         background: rgba(8,14,20,.8); border: 1px solid #e0952a; padding: 9px 16px; border-radius: 4px;
         font-size: 13px; letter-spacing: .06em; max-width: 720px; text-align: center; }
@@ -662,7 +849,20 @@ export class TrafasportRaidScene {
       #raid-hud .rh-lupa::after { content: ''; position: absolute; right: -46px; bottom: -34px; width: 70px;
         height: 16px; background: #6a5322; border-radius: 8px; transform: rotate(38deg); }
       /* Overlays: FLEX real + scroll propio. Nada de tamaños fijos que se
-         amontonen en un móvil (ADR-008/009). Todo escala con clamp(). */
+         amontonen en un móvil (ADR-008/009). Todo escala con clamp().
+
+         Estos DOS velos ocupan inset 0, así que NO pueden desplazarse ni
+         escalarse: al hacerlo despegan de los bordes y dejan ver el canvas
+         desnudo por la franja que destapan. Durante un tiempo eso los dejó
+         fuera de ui/Paneles.js, conmutados con classList a mano — y con ello
+         perdían el respaldo por temporizador del sistema. Ya no: entran y
+         salen por abrirVelo/cerrarVelo, que es el mismo sistema con
+         y: 0 y scale: 1 (fundido puro). La TARJETA de dentro
+         (.rh-final-card) sí entra con masa, como el resumen de Chimbote.
+
+         AVISO para quien edite este bloque: son comentarios DENTRO de un
+         template literal. Un backtick aquí cierra la cadena y rompe el build
+         de Vite con un error de sintaxis a 40 líneas de distancia. */
       #raid-hud .rh-start, #raid-hud .rh-final { position: absolute; inset: 0; display: flex;
         align-items: center; justify-content: center; pointer-events: auto;
         overflow-y: auto; padding: clamp(12px, 3vh, 32px) clamp(12px, 4vw, 40px);
@@ -697,13 +897,17 @@ export class TrafasportRaidScene {
         /* El subtítulo ocupa el ancho inferior sin tapar la acción ni el mando */
         #raid-hud .rh-sub { width: 94vw; max-width: 94vw; bottom: auto; top: 74px;
           font-size: 15px; padding: 10px 14px; line-height: 1.4; }
+        /* Aquí el subtítulo ya vive ARRIBA: hay que anular el desplazamiento de
+           escritorio o quedaría estirado entre top y bottom a la vez. */
+        body.jc-guiando #raid-hud .rh-sub { bottom: auto; }
         #raid-hud .rh-obj { top: 46px; font-size: 11px; padding: 7px 10px; max-width: 94vw; width: max-content; }
         #raid-hud .rh-timer { top: 92px; font-size: 34px; }
-        #raid-hud .rh-scan { top: 34%; font-size: 12px; max-width: 88vw; }
-        /* La barra de decisión sube: abajo vive el joystick */
-        #raid-hud .rh-hint { bottom: auto; top: 50%; font-size: 12px; max-width: 92vw; text-align: center; }
         #raid-hud .rh-check { right: 8px; top: 76px; font-size: 11px; line-height: 1.7; padding: 8px 10px; }
-        #raid-hud .rh-toast { max-width: 92vw; font-size: 12px; top: 76px; }
+        /* Aquí vivían reglas para .rh-toast, .rh-scan y .rh-hint: clases que
+           este HUD nunca tuvo. Se copiaron del muelle (donde sí existen, como
+           .ph-toast, .ph-scan y .ph-hint) y llevaban desde entonces sin pintar
+           nada. El aviso equivalente al toast de Chimbote, en el raid, es el
+           subtítulo del narrador (.rh-sub). */
         #raid-hud .rh-lupa { width: 150px; height: 150px; margin: -75px 0 0 -75px; border-width: 4px; }
         /* Las tipografías ya son fluidas en la regla base (clamp): aquí solo
            layout. Duplicar font-size aquí solo creaba conflictos. */
@@ -712,10 +916,11 @@ export class TrafasportRaidScene {
       /* Apaisado bajo: el subtítulo vuelve abajo pero encima del mando */
       @media (max-height: 460px) and (pointer: coarse) {
         #raid-hud .rh-sub { top: auto; bottom: 8px; left: 50%; width: 62vw; max-width: 62vw; font-size: 13px; }
+        /* Apaisado bajo: abajo no cabemos los dos. El subtítulo sube del todo. */
+        body.jc-guiando #raid-hud .rh-sub { top: 52px; bottom: auto; width: 94vw; max-width: 94vw; }
         #raid-hud .rh-obj { font-size: 10px; padding: 5px 8px; }
         #raid-hud .rh-timer { top: 76px; font-size: 28px; }
         #raid-hud .rh-check { top: 62px; font-size: 10px; line-height: 1.5; }
-        #raid-hud .rh-hint { top: 46%; }
       }
     `;
     const style = document.createElement('style');
@@ -803,6 +1008,21 @@ export class TrafasportRaidScene {
     this._zapDrag = null;
   }
 
+  /**
+   * Lanza la lección de Justus para una fase. SIEMPRE muda: el raid está
+   * narrado de principio a fin y dos voces sobre el mismo altavoz se pisan
+   * (`Narrator.decir` cancela lo anterior). El retardo deja que la frase del
+   * narrador entre primero; la tarjeta llega justo después, cuando el jugador
+   * ya sabe QUÉ pasa y necesita saber CÓMO responder.
+   */
+  #guia(n, retardo = 2600) {
+    const pasos = leccionRaid(isTouch)[n];
+    if (!pasos) return;
+    this.#later(() => {
+      if (this.fase === n) coach.guiar(`trafasport:f${n}`, pasos.map((p) => ({ ...p, voz: false })));
+    }, retardo);
+  }
+
   // ══ FASE 1 · Infiltración K-9 ═════════════════════════════════════════════
   #startFase1() {
     this.fase = 1;
@@ -844,18 +1064,15 @@ export class TrafasportRaidScene {
     this.post.detective += (target - this.post.detective) * Math.min(1, dt * 5);
     // El humo SOLO existe para el olfato: su opacidad sigue al modo detective
     // (la cadena lo compone siempre, así que se apaga por material).
-    this.trail.material.opacity = this.post.detective * 0.9;
-    if (this.sniffHeld) {
-      const posAttr = this.trail.geometry.attributes.position;
-      for (let i = 0; i < posAttr.count; i++) {
-        const sx = this.trailSeed[i * 2]; const sy = this.trailSeed[i * 2 + 1];
-        // Ruido barato tipo Perlin: capas de senos desincronizados.
-        posAttr.array[i * 3] = this.trailBase[i * 3] + Math.sin(t * 1.7 + sx) * 0.16 + Math.sin(t * 3.1 + sy) * 0.07;
-        posAttr.array[i * 3 + 1] = this.trailBase[i * 3 + 1] + 0.12 + Math.sin(t * 2.3 + sx * 2) * 0.12 + Math.sin(sy + t) * 0.05;
-        posAttr.array[i * 3 + 2] = this.trailBase[i * 3 + 2] + Math.cos(t * 1.3 + sy) * 0.1;
-      }
-      posAttr.needsUpdate = true;
-    }
+    // 0.72 y no 0.95: el rastro converge hacia el punto de fuga del pasillo y
+    // ahí se apilan cientos de partículas. Con la opacidad alta ese punto se
+    // quemaba a blanco y se tragaba a Justus.
+    this.trailMat.uniforms.uOpacidad.value = this.post.detective * 0.72;
+    // El penacho se anima solo en la GPU: aquí solo avanza su reloj. Se sigue
+    // moviendo aunque el jugador suelte el olfato (se desvanece en marcha, no
+    // se congela a media bocanada) y no cuesta un vértice de CPU.
+    this.trailMat.uniforms.uTime.value = t;
+    this.trailMat.uniforms.uAlturaPx.value = window.innerHeight;
 
     // Cámara de perro: sigue a Justus desde atrás, a ras del suelo.
     const jp = this.justus.position;
@@ -920,9 +1137,10 @@ export class TrafasportRaidScene {
     this.fase = 2;
     bus.emit(Señal.FASE_COMPLETADA, { fase: 1 });
     this.$fase.textContent = 'FASE 2 · ALLANAMIENTO';
+    this.#guia(2, 1800); // aquí corre un cronómetro: el consejo no puede tardar
     this.sniffHeld = false;
     this.post.detective = 0;
-    this.trail.material.opacity = 0; // fin del olfato: el rastro se apaga
+    this.trailMat.uniforms.uOpacidad.value = 0; // fin del olfato: el rastro se apaga
     audio.musica(null);
     audio.stinger();
     this.#narra('¡ADUANAS! ¡Nadie se mueve! …El vendedor jala una palanca. Doscientas cajas de zapatos sepultan la evidencia. Quince segundos antes de que llegue su abogado. ¡DESENTIÉRRALA!', 200);
@@ -975,7 +1193,20 @@ export class TrafasportRaidScene {
 
     // El reloj de los 15 segundos.
     this.fase2Left = 15;
-    this.$timer.classList.remove('hidden');
+    // El texto se pinta ANTES de abrir, y no es cosmético: `.rh-timer` se
+    // centra con `translateX(-50%)` y no tiene ancho propio. GSAP reconoce ese
+    // centrado midiendo el nodo (`cache.xPercent = x && ...`, CSSPlugin), pero
+    // un nodo VACÍO mide 0, el desplazamiento sale 0 y la comprobación falla:
+    // el cronómetro entraría descolgado a la izquierda y saltaría al centro al
+    // acabar la animación. Con contenido dentro, mide bien y entra centrado.
+    this.#pintarTimer();
+    abrirHidden(this.$timer, { y: -12, scale: 0.9, duration: 0.4, sfx: false });
+  }
+
+  /** El cronómetro y su cuenta de cajas encima de la evidencia. */
+  #pintarTimer(encima = this.cajas.length) {
+    this.$timer.innerHTML = `${Math.max(0, this.fase2Left).toFixed(1)}`
+      + `<div style="font-size:15px;color:#e0c07a">cajas sobre la evidencia: ${encima}</div>`;
   }
 
   /**
@@ -1070,7 +1301,7 @@ export class TrafasportRaidScene {
     this.fase2Left -= dt;
     const encima = this.cajas.filter((c) =>
       Math.hypot(c.position.x - this.paquete.position.x, c.position.z - this.paquete.position.z) < 0.95).length;
-    this.$timer.innerHTML = `${Math.max(0, this.fase2Left).toFixed(1)}<div style="font-size:15px;color:#e0c07a">cajas sobre la evidencia: ${encima}</div>`;
+    this.#pintarTimer(encima);
     if (this.fase2Left <= 0) {
       this.fase2Left = 15; // el narrador se apiada, pero tose.
       this.#tosNarrador('El abogado se retrasó en el tráfico. Tienes QUINCE segundos más. No me hagas toser de nuevo.');
@@ -1080,7 +1311,7 @@ export class TrafasportRaidScene {
     this.fase2T = (this.fase2T ?? 0) + dt;
     const libre = this.fase2T > 2 && encima === 0;
     if (libre) {
-      this.$timer.classList.add('hidden');
+      cerrarHidden(this.$timer, { y: -10, duration: 0.24 });
       bus.emit(Señal.QTE_SUCCESS, { fase: 2, qte: 'evidencia' });
       gsap.to(this.paquete.position, { y: 1.4, duration: 0.7, ease: 'back.out(2)' });
       gsap.to(this.paquete.rotation, { y: Math.PI * 2, duration: 0.9 });
@@ -1119,6 +1350,7 @@ export class TrafasportRaidScene {
     this.fase = 3;
     bus.emit(Señal.FASE_COMPLETADA, { fase: 2 });
     this.$fase.textContent = 'FASE 3 · PERSECUCIÓN';
+    this.#guia(3, 1600);
     audio.musica('persecucion');
     this.#narra('¡SE FUGA POR LA GALERÍA! Empujó a Mateo, tiró un maniquí, ¡corre como si no hubiera pagado impuestos EN SU VIDA!', 0);
     this.#objetivo(isTouch
@@ -1267,6 +1499,7 @@ export class TrafasportRaidScene {
     this.fase = 4;
     bus.emit(Señal.FASE_COMPLETADA, { fase: 3 });
     this.$fase.textContent = 'FASE 4 · EL ARRESTO';
+    this.#guia(4, 1600);
     disposeObject(this.speedLines);
     for (const o of this.obstaculos) disposeObject(o);
     this.obstaculos.length = 0;
@@ -1292,7 +1525,7 @@ export class TrafasportRaidScene {
     anillo.position.set(0, 0.02, -1.4);
     this.anillo = anillo;
     this.scene.add(anillo);
-    this.$meter.classList.remove('hidden');
+    abrirHidden(this.$meter, { y: 18, scale: 0.9, duration: 0.42, sfx: false });
     this.tugProgress = 0;
 
     // Los tirones del vendedor: empujes programados hacia adelante.
@@ -1315,7 +1548,12 @@ export class TrafasportRaidScene {
   #tugDrag() {
     const dy = this.mouseY - this._lastTugY;
     this._lastTugY = this.mouseY;
-    if (dy > 0) this.tugProgress = Math.min(1, this.tugProgress + dy * 0.0012); // arrastrar hacia abajo = fuerza
+    if (dy <= 0) return;
+    this.tugProgress = Math.min(1, this.tugProgress + dy * 0.0012); // arrastrar hacia abajo = fuerza
+    // El forcejeo se SIENTE: cada tirón sacude la cámara en proporción a la
+    // fuerza aplicada. Sin esto, arrastrar a un hombre que se resiste tenía
+    // exactamente el mismo tacto que mover un control deslizante.
+    this.shake.add(Math.min(0.14, dy * 0.0016));
   }
 
   #updateFase4(dt, t) {
@@ -1329,7 +1567,7 @@ export class TrafasportRaidScene {
     if (this.tugProgress >= 1 && !this.arrestado) {
       this.arrestado = true;
       clearInterval(this._tugInterval);
-      this.$meter.classList.add('hidden');
+      cerrarHidden(this.$meter, { y: 12, duration: 0.24 });
       bus.emit(Señal.QTE_SUCCESS, { fase: 4, qte: 'arresto' });
       audio.musica(null);
       audio.stinger();
@@ -1370,13 +1608,21 @@ export class TrafasportRaidScene {
     this.fase = 5;
     bus.emit(Señal.FASE_COMPLETADA, { fase: 4 });
     this.$fase.textContent = 'FASE 5 · LA LECCIÓN';
+    this.#guia(5, 3200); // el reencuentro con Mateo merece respirar antes del consejo
     audio.musica('tienda');
     this.#narra('De vuelta en Trafasport. Mateo y su mamá esperan, asustados. Justus llega con su chaleco de héroe. Demuéstrales por qué esta zapatilla es contrabando.', 0);
     this.#objetivo(isTouch
       ? 'Tu DEDO lleva la lupa (mira por encima de él). ARRASTRA para girar la zapatilla y TOCA las 3 evidencias.'
       : 'Tu cursor ES una lupa. ARRASTRA para girar la zapatilla y haz CLIC en las 3 evidencias.');
-    this.$check.classList.remove('hidden');
-    this.$lupa.classList.remove('hidden');
+    abrirHidden(this.$check, { y: 14, scale: 0.92, duration: 0.46 });
+    // La lupa se coloca ANTES de asomar: se posiciona con `left`/`top` inline y
+    // hasta el primer `pointermove` no los tiene, así que nacía pegada a la
+    // esquina superior izquierda con su margen de -115 px. Y entra solo con
+    // escala, sin `y`: es un cristal que el jugador lleva en la mano, no una
+    // tarjeta que sube desde abajo.
+    this.$lupa.style.left = `${this.mouseX ?? window.innerWidth / 2}px`;
+    this.$lupa.style.top = `${(this.mouseY ?? window.innerHeight / 2) - (isTouch ? 90 : 0)}px`;
+    abrirHidden(this.$lupa, { y: 0, scale: 0.72, duration: 0.4, sfx: false });
 
     // La escena de la lección: pedestal frente a la tienda.
     this.camera.position.set(0, 1.5, -PASILLO + 4.2);
@@ -1541,8 +1787,12 @@ export class TrafasportRaidScene {
   #granFinal() {
     this.fase = 6;
     bus.emit(Señal.FASE_COMPLETADA, { fase: 5 });
-    this.$lupa.classList.add('hidden');
-    this.$check.classList.add('hidden');
+    // Se retiran los tres avisos de trabajo por el mismo camino por el que
+    // entraron. La cinta de objetivo no se cerraba NUNCA: seguía dando una
+    // orden ya cumplida hasta que el velo del desenlace la tapaba por encima.
+    cerrarHidden(this.$lupa, { y: 0, duration: 0.28 });
+    cerrarHidden(this.$check, { y: 10, duration: 0.28 });
+    this.#objetivoCumplido();
     audio.musica(null);
     audio.ladridoFeliz();
     this.#narra('¡GUAU, GUAU! Justus lo celebra. La mamá de Mateo respira. Y sobre Trafasport cae todo el peso de la ley… LITERALMENTE.', 200);
@@ -1595,7 +1845,13 @@ export class TrafasportRaidScene {
       btn.textContent = '◄ VOLVER AL MENÚ';
       btn.addEventListener('click', () => this.onExit());
       this.$finalCard.appendChild(btn);
-      this.$final.classList.remove('hidden');
+      // El velo entra plano (`abrirVelo` = fundido puro) y la tarjeta del
+      // desenlace, con peso. Antes el velo se destapaba con `classList` y
+      // aparecía de golpe: un fotograma negro seco justo en el momento más
+      // celebratorio del juego, con el confeti todavía cayendo detrás.
+      abrirVelo(this.$final, { duration: 0.55 });
+      abrirHidden(this.$finalCard, { y: 34, scale: 0.86, duration: 0.62 });
+      cascada(this.$finalCard.querySelectorAll('h2, p, button'), { y: 18, stagger: 0.07 });
     }, 4200);
   }
 
@@ -1622,7 +1878,7 @@ export class TrafasportRaidScene {
     const tick = () => {
       this._raf = requestAnimationFrame(tick);
       const dtReal = Math.min(this.clock.getDelta(), 0.05);
-      this.perf.update(dtReal);
+      this.perf.update(); // se cronometra solo con el reloj de pared
       // En pausa el mundo se congela pero se sigue renderizando.
       const dt = this.pausado ? 0 : this.hitStop.escala(dtReal);
       const t = this.clock.elapsedTime;

@@ -36,8 +36,14 @@ export const quality = {
   shadowMap: isMobile ? 512 : (modesto ? 1024 : 2048),
   /** Sombra de foco (linterna): más barata todavía. */
   spotShadowMap: isMobile ? 256 : 1024,
-  /** Partículas del rastro de olfato. */
-  particulasOlfato: isMobile ? 350 : 900,
+  /**
+   * Partículas del rastro de olfato. Se pudo subir al migrar la animación al
+   * vertex shader: ya no cuestan CPU, solo relleno de pantalla. En móvil se
+   * sube poco a propósito — el aditivo con textura es caro en fill rate.
+   */
+  particulasOlfato: isMobile ? 460 : 1500,
+  /** Motas de polvo suspendido (todo el movimiento va en el vertex shader). */
+  motas: isMobile ? 140 : 420,
   /** Segmentos del plano de agua de Chimbote. */
   aguaSegmentos: isMobile ? 64 : 120,
   /** Confeti del gran final. */
@@ -47,6 +53,26 @@ export const quality = {
   /** Antialias por hardware: caro en GPU móvil (el pixelRatio bajo ya suaviza). */
   antialias: !isMobile,
 };
+
+/**
+ * `?touch=1` fuerza además la CAPA CSS táctil marcando el `<body>`.
+ *
+ * Por qué hace falta: toda la remediación de contraste para móvil vive en
+ * `@media (pointer: coarse)`, y ese media query **no hay forma de activarlo
+ * desde un Chrome de escritorio**. Resultado: la parte del HUD que más falla en
+ * teléfonos era justo la única que no se podía mirar durante el desarrollo — y
+ * así fue como llegó a producción un interrogatorio con tinta oscura sobre
+ * cristal oscuro. Con `?touch=1` esas mismas reglas se aplican por clase y se
+ * pueden revisar en pantalla grande.
+ *
+ * En un dispositivo táctil de verdad la clase también se pone, y es inofensiva:
+ * las reglas por clase y las del media query son idénticas.
+ */
+if (typeof document !== 'undefined') {
+  const marcar = () => document.body?.classList.toggle('qa-tactil', isTouch);
+  if (document.body) marcar();
+  else document.addEventListener('DOMContentLoaded', marcar, { once: true });
+}
 
 /**
  * Raycaster con "dedo gordo": en táctil se amplía el umbral de puntos/líneas.

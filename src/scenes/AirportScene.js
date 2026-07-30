@@ -16,11 +16,13 @@ import { Justus } from '../world/Justus.js';
 import { NewsTV } from '../world/NewsTV.js';
 import { PassportBook } from '../world/PassportBook.js';
 import { Police } from '../world/Police.js';
+import { Motas } from '../world/Motas.js';
 import { XRayView } from '../xray/XRayView.js';
 import { audio } from '../audio/AudioEngine.js';
 import { narrator } from '../audio/Narrator.js';
 import { TurnManager } from '../gameplay/TurnManager.js';
 import { HUD } from '../ui/HUD.js';
+import { coach } from '../ui/JustusCoach.js';
 
 /**
  * main — el director de orquesta.
@@ -42,6 +44,13 @@ const justus = new Justus(scene, audio);
 const newsTV = new NewsTV(scene, audio);
 const passportBook = new PassportBook(scene, cine.camera, audio);
 const police = new Police(scene);
+// Polvo suspendido sobre el puesto: los fluorescentes del techo dejan de ser
+// planos y el aire entre la cámara y el pasajero pasa a tener cuerpo.
+const motas = new Motas(scene, {
+  centro: new THREE.Vector3(0, 1.9, -1.2),
+  ancho: 11, alto: 3.4, fondo: 9,
+  color: 0xe6eefa, opacidad: 0.17, tam: 8,
+});
 const xray = new XRayView(renderer.gl);
 const hud = new HUD(document.getElementById('hud-root'));
 const turn = new TurnManager();
@@ -68,6 +77,7 @@ engine.add(desk);
 engine.add(justus);
 engine.add(newsTV);
 engine.add(police);
+engine.add(motas);
 engine.add({ update: (dt, t) => actor?.update(dt, t) });
 engine.add(cine);
 engine.add({
@@ -83,7 +93,10 @@ engine.add({
     // Justus huele el miedo: banda crítica de estrés = gruñido de vigilancia.
     justus.setAlerta(!!actor && !!interrogatorio && !interrogatorio.quebrado && interrogatorio.stress >= 80);
 
-    if (xray.active) xray.update(dt, t);
+    // Los rayos X renderizan por su cuenta, así que hay que darle el latido al
+    // guardián de FPS a mano: si no, el nivel se queda sin red de seguridad
+    // durante todo el minijuego — justo su pantalla más cargada.
+    if (xray.active) { renderer.vigilar(); xray.update(dt, t); }
     else renderer.update(dt);
   },
 });
@@ -140,20 +153,59 @@ function presentNext() {
   showMainDock();
 
   setTimeout(() => { if (turn.caso === caso) decir(caso.perfil.nombre, caso.dialogos.saludo); }, 2600);
+
+  // Justus da la bienvenida al puesto en el primer pasajero de la carrera.
+  // Espera a que el saludo del pasajero termine: dos voces a la vez no se
+  // entiende ninguna.
+  if (turn.turnoN === 1 && turn.indice === 0) {
+    setTimeout(() => { if (turn.caso === caso) coach.guiar('aeropuerto', PASOS_JUSTUS_AEROPUERTO); }, 6200);
+  } else {
+    coach.setPata(true);
+  }
 }
+
+/**
+ * La clase magistral del K-9 veterano. Cinco frases, una por herramienta, cada
+ * una iluminando el botón del que habla. Tono: gruñón pero de tu lado.
+ */
+const PASOS_JUSTUS_AEROPUERTO = [
+  {
+    txt: '¡Jefe! Bienvenido al turno noche. Yo soy Justus, doce años en esta puerta. Le enseño el puesto en treinta segundos y no volvemos a hablar de esto.',
+  },
+  {
+    txt: 'Primero, MIRE a la persona. Lea su ficha y compare lo que dice con lo que hace su cuerpo. Con INTERROGAR se sienta frente a él: sus ojos, sus manos y su garganta son botones — tóquelos cuando reaccionen.',
+    foco: '#dock button[data-tool="interrogar"]',
+  },
+  {
+    txt: 'En DOCUMENTOS se arrastran las hojas del pasaporte. Los sellos no mienten: una ruta que no cuadra con la historia vale más que cualquier confesión.',
+    foco: '#dock button[data-tool="documentos"]',
+  },
+  {
+    txt: 'Si algo le huele mal, RAYOS X. Cambie el contraste para separar lo orgánico de lo inorgánico y toque la silueta rara para anotarla en el expediente.',
+    foco: '#dock button[data-tool="xray"]',
+  },
+  {
+    txt: '¿Y si prefiere una segunda opinión? Llámeme. Yo olfateo el equipaje y si marco, me SIENTO y no me muevo. Cuando me siento, jefe, no me equivoco.',
+    foco: '#dock button[data-tool="justus"]',
+  },
+  {
+    txt: 'Al final, DECIDIR: pase, cobro, retenido o derivado. El sello es irreversible y su reputación lo recuerda todo. Sin señales en el expediente es una corazonada… y las corazonadas se pagan. Suerte.',
+    foco: '#dock button[data-tool="decidir"]',
+  },
+];
 
 function showMainDock() {
   const caso = turn.caso;
   hud.hideTools();
   hud.showDock([
-    { label: 'INTERROGAR', onClick: openInterrogation },
-    { label: 'DOCUMENTOS', onClick: openDocuments },
-    { label: 'RAYOS X', onClick: openXray },
-    { label: justusUsado ? 'JUSTUS ✓' : 'JUSTUS (K-9)', disabled: justusUsado, onClick: callJustus },
+    { id: 'interrogar', label: 'INTERROGAR', onClick: openInterrogation },
+    { id: 'documentos', label: 'DOCUMENTOS', onClick: openDocuments },
+    { id: 'xray', label: 'RAYOS X', onClick: openXray },
+    { id: 'justus', label: justusUsado ? 'JUSTUS ✓' : 'JUSTUS (K-9)', disabled: justusUsado, onClick: callJustus },
     ...(turn.escanerCorporalDisponible()
-      ? [{ label: 'ESCÁNER CORPORAL', cls: 'peligro', onClick: openCorporal }]
+      ? [{ id: 'corporal', label: 'ESCÁNER CORPORAL', cls: 'peligro', onClick: openCorporal }]
       : []),
-    { label: 'DECIDIR', cls: 'primary', onClick: openDecision },
+    { id: 'decidir', label: 'DECIDIR', cls: 'primary', onClick: openDecision },
   ]);
   bus.emit(Señal.HERRAMIENTA_USADA, { caso_id: caso.id });
 }
@@ -547,5 +599,5 @@ window.addEventListener('keydown', (e) => {
 
 // Gancho de depuración (solo dev): permite inspeccionar sistemas desde la consola.
 if (import.meta.env?.DEV) {
-  window.__AH = { bus, Señal, turn, cine, newsTV, justus, audio, renderer };
+  window.__AH = { bus, Señal, turn, cine, newsTV, justus, audio, renderer, xray, hud, motas };
 }

@@ -72,11 +72,11 @@ html, body {
 .topbar {
   position: absolute; top: 0; left: 0; right: 0;
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 18px; font-size: 11px; letter-spacing: 2px; color: var(--ink-dim);
-  background: linear-gradient(rgba(5, 8, 12, 0.85), transparent);
+  padding: 10px 18px 16px; font-size: 11px; letter-spacing: 2px; color: #cfdae7;
+  background: linear-gradient(rgba(5, 8, 12, 0.9) 0%, rgba(5, 8, 12, 0.7) 55%, transparent);
 }
-.topbar .alerta { color: var(--accent); }
-.topbar .rep { color: var(--ink); }
+.topbar .alerta { color: #f0ac3e; font-weight: 700; }
+.topbar .rep { color: #ffffff; }
 .tb-derecha { display: flex; align-items: center; gap: 12px; }
 #btn-voz {
   background: none; border: 1px solid var(--panel-line); color: var(--ink);
@@ -136,7 +136,8 @@ html, body {
   background: rgba(208, 138, 29, 0.09); border-left: 2px solid var(--accent);
   animation: señal-in 0.4s ease;
 }
-#expediente .vacio { color: #4a5460; font-size: 12px; font-style: italic; }
+/* #4a5460 era invisible sobre el cristal con el panel de vuelos detrás. */
+#expediente .vacio { color: #93a2b3; font-size: 12px; font-style: italic; }
 @keyframes señal-in { from { transform: translateX(16px); opacity: 0; } }
 
 /* Ficha del pasajero */
@@ -145,51 +146,93 @@ html, body {
 #ficha .meta { color: var(--ink-dim); font-size: 11px; margin: 4px 0 10px; line-height: 1.5; }
 #ficha .obs { font-size: 12px; line-height: 1.55; color: #c6cedb; font-style: italic; }
 
-/* Interrogatorio: la libreta del oficial (papel, no cajones) */
+/* ── Interrogatorio: LA LIBRETA TÁCTICA ──────────────────────────────────
+   Antes era papel beige con tinta marrón. Bonito en el monitor del diseñador y
+   una trampa en producción: `theme.css` eleva todo `.panel` a cristal oscuro con
+   `!important`, así que el fondo beige desaparecía y la tinta marrón quedaba
+   sobre negro. En un teléfono era literalmente invisible.
+   Ahora la libreta ES oscura por diseño: azul noche mate, tinta blanca pura y
+   ámbar. Se conserva el lomo rojo, la inclinación y la letra manuscrita de las
+   preguntas — el carácter de libreta sin el riesgo de contraste. */
 #interrogatorio {
   bottom: 24px; left: 18px; width: 380px; max-width: 94vw;
-  background: linear-gradient(172deg, #e6dfc9, #d6cbae);
-  border: none; border-left: 14px solid #8a2c2c; /* el lomo de la libreta */
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
-  color: #2c2618; padding: 14px 18px 12px;
+  /* TECHO DE ALTURA. La libreta crece hacia arriba con cada pregunta, y con
+     objetivos táctiles de 52 px (tablet apaisada de más de 1024 px: puntero
+     grueso pero layout de escritorio) llegaba a comerse la ficha del pasajero,
+     que vive arriba a la izquierda. Con techo y scroll propio nunca la tapa. */
+  max-height: calc(100vh - 268px);
+  overflow-y: auto; overscroll-behavior: contain;
+  background: linear-gradient(168deg, rgba(16, 25, 39, 0.94), rgba(7, 11, 18, 0.96));
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid rgba(150, 180, 216, 0.26);
+  border-left: 10px solid #8a2c2c; /* el lomo de la libreta, intacto */
+  border-radius: 4px 12px 12px 4px;
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  color: #f4f8fc; padding: 14px 18px 12px;
   transform: rotate(-0.5deg);
 }
+@supports not (backdrop-filter: blur(1px)) {
+  #interrogatorio { background: linear-gradient(168deg, #101927, #070b12); }
+}
 .libreta-titulo {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: #7a6a45;
-  border-bottom: 2px solid #b5a87f; padding-bottom: 6px; margin-bottom: 8px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 2.5px; font-weight: 700;
+  color: #f5b544;
+  border-bottom: 1px solid rgba(245, 181, 68, 0.35); padding-bottom: 7px; margin-bottom: 9px;
 }
 #interrogatorio .temas { display: flex; flex-direction: column; margin-bottom: 10px; }
 #interrogatorio button.tema {
-  background: none; border: none; text-align: left; cursor: pointer;
-  font-family: var(--serif); font-style: italic; font-size: 16px; color: #3a3020;
-  padding: 5px 4px; border-bottom: 1px dashed rgba(122, 106, 69, 0.4);
-  transition: background 0.15s, padding-left 0.15s;
+  background: rgba(255, 255, 255, 0.035); border: none; text-align: left; cursor: pointer;
+  font-family: var(--serif); font-style: italic; font-size: 16px; color: #ffffff;
+  padding: 9px 10px; margin-bottom: 4px; border-radius: 4px;
+  border-left: 2px solid transparent;
+  border-bottom: 1px dashed rgba(150, 180, 216, 0.22);
+  transition: background 0.15s, padding-left 0.15s, border-color 0.15s, color 0.15s;
 }
-#interrogatorio button.tema:hover { background: rgba(190, 140, 30, 0.16); padding-left: 12px; }
-#interrogatorio button.tema:disabled { opacity: 0.35; cursor: default; }
+#interrogatorio button.tema:hover {
+  background: rgba(245, 181, 68, 0.16); padding-left: 18px;
+  border-left-color: #f5b544; color: #ffe6b0;
+}
+#interrogatorio button.tema:disabled { opacity: 0.32; cursor: default; }
 #interrogatorio .tacticas { display: flex; gap: 8px; margin-bottom: 8px; }
 #interrogatorio button.tactica {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  background: rgba(44, 38, 24, 0.06); border: 1px solid #b5a87f; color: #2c2618;
-  padding: 8px 4px; cursor: pointer; transition: background 0.15s, transform 0.1s;
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(150, 180, 216, 0.3); border-radius: 6px;
+  color: #ffffff; padding: 9px 4px; cursor: pointer;
+  transition: background 0.15s, transform 0.1s, border-color 0.15s, box-shadow 0.15s;
 }
-#interrogatorio button.tactica b { font-size: 17px; font-weight: normal; }
-#interrogatorio button.tactica span { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; }
-#interrogatorio button.tactica:hover { background: rgba(190, 140, 30, 0.2); }
-#interrogatorio button.tactica:active { transform: translateY(1px); }
-#interrogatorio button.confrontar { border-color: #a31f27; color: #a31f27; }
-.libreta-pista { font-size: 11px; color: #7a6a45; font-style: italic; margin: 4px 0 6px; line-height: 1.5; }
+#interrogatorio button.tactica b { font-size: 18px; font-weight: normal; color: #f5b544; line-height: 1; }
+#interrogatorio button.tactica span {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 1px; font-weight: 700; color: #eaf1f8;
+}
+#interrogatorio button.tactica:hover {
+  background: rgba(245, 181, 68, 0.2); border-color: #f5b544;
+  box-shadow: 0 0 0 1px rgba(245, 181, 68, 0.5), 0 8px 22px rgba(245, 181, 68, 0.14);
+}
+#interrogatorio button.tactica:active { transform: translateY(1px) scale(.985); }
+#interrogatorio button.tactica:disabled { opacity: 0.32; cursor: default; }
+#interrogatorio button.confrontar { border-color: rgba(226, 102, 95, 0.6); }
+#interrogatorio button.confrontar b { color: #e2665f; }
+.libreta-pista {
+  font-size: 11px; color: #b6c4d4; font-style: italic; margin: 6px 0; line-height: 1.55;
+}
 #interrogatorio button.volver {
-  background: #2c2618; color: #e6dfc9; border: none; font-family: var(--mono);
-  font-size: 10px; letter-spacing: 2px; padding: 8px 14px; cursor: pointer; margin-top: 4px;
+  background: rgba(255, 255, 255, 0.07); color: #ffffff;
+  border: 1px solid rgba(150, 180, 216, 0.3); border-radius: 4px;
+  font-family: var(--mono); font-weight: 700;
+  font-size: 10px; letter-spacing: 2px; padding: 10px 16px; cursor: pointer; margin-top: 4px;
+  transition: border-color .15s, background .15s;
 }
-#interrogatorio .chip-tell { color: #8a5a10; border-color: #8a5a10; }
+#interrogatorio button.volver:hover { border-color: #f5b544; background: rgba(245, 181, 68, 0.14); }
 .chip-tell {
-  display: inline-block; margin-top: 8px; padding: 8px 14px; cursor: pointer;
-  border: 1px dashed var(--accent); color: var(--accent); font-size: 11px; letter-spacing: 1px;
+  display: inline-block; margin-top: 8px; padding: 10px 14px; cursor: pointer;
+  border: 1px dashed #f5b544; border-radius: 4px; color: #ffe0a0;
+  background: rgba(245, 181, 68, 0.1);
+  font-size: 11px; letter-spacing: 1px; line-height: 1.4;
   animation: chip-pulse 1.2s infinite;
 }
-@keyframes chip-pulse { 50% { background: rgba(208, 138, 29, 0.12); } }
+@keyframes chip-pulse { 50% { background: rgba(245, 181, 68, 0.26); } }
 
 /* Documentos */
 #documentos {
@@ -339,8 +382,8 @@ html, body {
   }
 
   /* Dock: los botones se envuelven y crecen para el dedo */
-  .dock { flex-wrap: wrap; gap: 6px; padding: 10px 8px 14px; }
-  .dock button, .panel button { font-size: 11px; padding: 13px 12px; min-height: 48px; letter-spacing: 1px; }
+  .dock { flex-wrap: wrap; gap: 7px; padding: 10px 8px 14px; }
+  .dock button, .panel button { font-size: 11px; padding: 14px 13px; min-height: 52px; letter-spacing: 1px; }
 
   /* Paneles laterales: ya no caben a los lados — se encogen y suben */
   #expediente { top: 46px; right: 8px; width: 44vw; max-width: 210px; max-height: 30vh; padding: 10px; }
@@ -352,13 +395,14 @@ html, body {
 
   /* Libreta del interrogatorio: a pantalla casi completa */
   #interrogatorio {
-    left: 50%; bottom: 12px; transform: translateX(-50%) rotate(-0.5deg);
-    width: 94vw; max-width: 94vw; max-height: 62vh; overflow-y: auto;
-    padding: 12px 14px 10px; border-left-width: 10px;
+    left: 50%; bottom: 10px; transform: translateX(-50%) rotate(0deg);
+    width: 94vw; max-width: 94vw; max-height: 64vh; overflow-y: auto;
+    padding: 13px 14px 12px; border-left-width: 7px;
+    border-radius: 4px 14px 14px 4px;
   }
-  #interrogatorio button.tema { font-size: 15px; padding: 10px 4px; min-height: 44px; }
-  #interrogatorio .tacticas { flex-wrap: wrap; gap: 6px; }
-  #interrogatorio button.tactica { min-width: 30%; min-height: 54px; }
+  #interrogatorio button.tema { font-size: 15px; padding: 13px 12px; min-height: 52px; }
+  #interrogatorio .tacticas { flex-wrap: wrap; gap: 7px; }
+  #interrogatorio button.tactica { min-width: 22%; min-height: 58px; }
 
   /* Documentos: una columna centrada */
   #documentos {
@@ -448,6 +492,84 @@ html, body {
 
   .toast { max-width: 92vw; font-size: clamp(10px, 1.6vw, 13px); }
   .topbar { font-size: clamp(8px, 1.2vw, 11px); padding: 7px 10px; gap: 6px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ALTO CONTRASTE TÁCTIL — la capa que garantiza que en un teléfono NADA
+   quede por debajo de un ratio legible (objetivo: ≥ 7:1 en texto de acción).
+   El problema no era el color elegido sino la TRANSPARENCIA: sobre la terminal
+   del aeropuerto —que es una superficie clara y muy iluminada— un panel al 62 %
+   deja pasar tanta luz que la tinta se disuelve. Aquí las superficies de acción
+   pasan a ser opacas de verdad y la tinta sube a blanco puro.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (pointer: coarse) {
+  /* Dock (INTERROGAR · DOCUMENTOS · RAYOS X · JUSTUS · DECIDIR) */
+  .dock {
+    background: linear-gradient(transparent, rgba(4, 7, 11, 0.96) 42%);
+  }
+  .dock button {
+    background: linear-gradient(180deg, rgba(20, 30, 45, 0.985), rgba(8, 13, 21, 0.99)) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(150, 180, 216, 0.38) !important;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  }
+  .dock button.primary { border-color: #f5b544 !important; color: #ffd280 !important; }
+  .dock button.peligro { border-color: #e2665f !important; color: #ff9f97 !important; }
+  .dock button:disabled { opacity: 0.42; }
+
+  /* Cinta de diálogo: el subtítulo es lo último que puede fallar */
+  .dialogo {
+    background: linear-gradient(90deg, rgba(5, 9, 15, 0.965), rgba(5, 9, 15, 0.9)) !important;
+    color: #ffffff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    border-left-width: 4px !important;
+  }
+  .dialogo .hablante { color: #f5b544 !important; font-weight: 700; }
+
+  /* Avisos flotantes y etiqueta de rayos X */
+  .toast, #xray-label {
+    background: rgba(6, 10, 17, 0.97) !important;
+    color: #ffffff; font-weight: 600;
+  }
+
+  /* Sellos de decisión: el gesto irreversible merece dedos cómodos */
+  #decision button { min-height: 56px; font-weight: 700; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+  #decision .aviso {
+    color: #cfdae7; background: rgba(6, 10, 17, 0.94); padding: 9px 12px; border-radius: 6px;
+    margin-top: 12px; line-height: 1.5;
+  }
+
+  /* Documentos de papel: siguen siendo papel, pero con tinta más negra */
+  .doc { color: #211c10; }
+  .doc .linea.señalable { border-bottom-color: #8a7440; }
+
+  /* Ficha y expediente */
+  #ficha .obs { color: #dbe3ee; }
+  #ficha .meta { color: #a9b8c9; }
+  #expediente .señal { color: #f0f5fb; }
+  #expediente .vacio { color: #8b98a8; }
+  .panel h3 { color: #b3c2d3 !important; }
+}
+
+/* ── Pantallas estrechas de verdad (iPhone 12/13/14 = 390 px) ───────────── */
+@media (max-width: 430px), (pointer: coarse) and (max-width: 430px) {
+  .dock { gap: 6px; padding: 8px 6px 12px; }
+  .dock button {
+    flex: 1 1 30%; font-size: 10px; padding: 13px 6px; letter-spacing: .5px;
+    overflow-wrap: anywhere; hyphens: auto;
+  }
+  #interrogatorio { width: 96vw; max-width: 96vw; padding: 12px 12px 11px; }
+  #interrogatorio button.tema { font-size: 14.5px; line-height: 1.35; overflow-wrap: anywhere; }
+  #interrogatorio .tacticas { gap: 6px; }
+  #interrogatorio button.tactica { flex: 1 1 22%; min-width: 0; padding: 8px 2px; }
+  #interrogatorio button.tactica span { font-size: 8px; letter-spacing: .3px; }
+  .libreta-titulo { font-size: 9px; letter-spacing: 1.6px; line-height: 1.4; }
+  .libreta-pista { font-size: 10.5px; }
+  #decision .sellos { gap: 6px; }
+  #decision button { flex: 1 1 44%; font-size: 12px; padding: 15px 8px; letter-spacing: 1px; }
+  /* Ficha y expediente no pueden comerse la escena en un ancho de 390 px */
+  #ficha, #expediente { width: 43vw; max-height: 26vh; padding: 9px 10px; }
+  .dialogo { width: 95vw; max-width: 95vw; }
 }
 
 /* ── Aviso de rotación: el juego pide apaisado ─────────────────────────── */

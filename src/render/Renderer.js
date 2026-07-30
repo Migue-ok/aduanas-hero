@@ -6,6 +6,7 @@ import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CinematicPass } from './CinematicPass.js';
 import { quality } from '../core/Device.js';
+import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.js';
 
 /**
  * Renderer — la sala de proyección.
@@ -48,18 +49,62 @@ export class Renderer {
 
     this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.18, // fuerza: los fluorescentes y pantallas florecen, nada más
-      0.5,
-      0.92,
+      0.42, // fuerza: fluorescentes, monitores y el ámbar del sello IRRADIAN
+      0.68, // radio: halo ancho y suave, no un contorno duro
+      0.95, // umbral por luminancia
     );
+    // Rodilla suave (ver la nota larga en PostFX.js): con el `smoothWidth` por
+    // defecto de 0.01 el corte es binario y aparecen bordes sucios alrededor de
+    // cada luz. Con 0.35 el mostrador blanco del puesto aporta ~5 % y solo los
+    // emisivos de verdad florecen — se puede subir la fuerza sin lavar la sala.
+    this.bloom.highPassUniforms.smoothWidth.value = 0.35;
+    // En móvil nace apagado, igual que en los niveles 2 y 3 (`PostFX` lo omite
+    // por ser «el paso más caro con diferencia»). El aeropuerto era el único
+    // que lo ejecutaba en teléfono sin preguntar: una pirámide de mips con blur
+    // separable, ~10 pasadas a pantalla completa, encima del DOF y con el
+    // presupuesto de un móvil de gama media. Era el mayor gasto de relleno del
+    // nivel y estaba fuera de todo control de calidad.
+    //
+    // Efecto secundario bueno: el escalón «bloom off» del guardián (más abajo)
+    // pasa a devolver `false` en móvil, así que en vez de gastar su ventana de
+    // 1,5 s apagando algo que ya estaba apagado, salta al siguiente recorte.
+    this.bloom.enabled = !quality.mobile;
     this.composer.addPass(this.bloom);
 
     this.cinematic = new CinematicPass();
     this.composer.addPass(this.cinematic);
     this.composer.addPass(new OutputPass());
 
+    // El aeropuerto tenía su propio guardián de FPS copiado a mano (umbral 28 y
+    // un único escalón todo-o-nada) mientras los otros dos niveles usaban
+    // `PerfGuard`. Ahora los tres comparten el mismo, con el mismo umbral de 50
+    // y la misma escalera: un solo sitio que tocar y ningún umbral divergente.
+    this.perf = new PerfGuard([
+      { nombre: 'DOF off', aplicar: () => {
+        if (!this.bokeh.enabled) return false; // en móvil ya nace apagado
+        this.bokeh.enabled = false;
+        return true;
+      } },
+      recorteRatioPixel(this.gl, this),
+      { nombre: 'bloom off', aplicar: () => {
+        if (!this.bloom.enabled) return false;
+        this.bloom.enabled = false;
+        return true;
+      } },
+      recorteSombras(() => {
+        const luces = [];
+        scene.traverse((o) => { if (o.isLight && o.castShadow) luces.push(o); });
+        return luces;
+      }),
+    ]);
+
     window.addEventListener('resize', () => this.#resize());
   }
+
+  /** Lo necesita `recorteRatioPixel`: el composer cachea el ratio (ver PerfGuard). */
+  setPixelRatio(ratio) { this.composer.setPixelRatio?.(ratio); }
+
+  setSize(w, h) { this.composer.setSize(w, h); }
 
   /** Focus pull: el DOF persigue esta distancia (rack focus con GSAP desde la cámara). */
   setFocusDistance(distance) {
@@ -80,32 +125,20 @@ export class Renderer {
   }
 
   update(dt) {
-    this.#adaptQuality(dt);
+    this.vigilar();
     this.cinematic.update(dt, this.tension);
     this.composer.render();
   }
 
   /**
-   * Calidad adaptativa: 60 FPS manda sobre el caramelo visual.
-   * Si el promedio cae bajo 28 FPS sostenidos, se apaga el DOF (el pase más
-   * caro) y se baja el pixel ratio a 1. Nunca se re-sube en la sesión: el
-   * yo-yo de calidad se nota más que la calidad baja.
+   * Un latido del guardián de FPS, sin renderizar.
+   *
+   * Existe porque el minijuego de rayos X renderiza por su cuenta
+   * (`XRayView.update`) y durante todo ese modo de juego `update()` no se
+   * llamaba: el aeropuerto se quedaba literalmente ciego a los FPS justo en su
+   * pantalla más cargada. La escena lo invoca en las dos ramas.
    */
-  #fpsEma = 60;
-  #lowTime = 0;
-  #degraded = false;
-
-  #adaptQuality(dt) {
-    if (this.#degraded || dt <= 0) return;
-    const fps = 1 / dt;
-    this.#fpsEma += (fps - this.#fpsEma) * 0.05;
-    this.#lowTime = this.#fpsEma < 28 ? this.#lowTime + dt : 0;
-    if (this.#lowTime > 2) {
-      this.#degraded = true;
-      this.bokeh.enabled = false;
-      this.gl.setPixelRatio(1);
-      this.composer.setSize(window.innerWidth, window.innerHeight);
-      console.info('[AduanasHero] Calidad adaptativa: DOF apagado, pixelRatio 1 (FPS bajo sostenido).');
-    }
+  vigilar() {
+    this.perf.update();
   }
 }

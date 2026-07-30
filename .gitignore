@@ -1,4 +1,21 @@
 node_modules/
 dist/
 .env
+.env.*
 .DS_Store
+
+# Herramientas locales de desarrollo: nunca al repositorio público.
+# `cloudflared` es el túnel que se usa para probar el juego desde el móvil; su
+# binario pesa 21 MB (más que cualquier asset del juego) y no interviene ni en
+# el build ni en el despliegue.
+cloudflared.exe
+cloudflare.log
+
+# Referencias visuales de trabajo (fotos de apoyo para la dirección de arte).
+# No son assets: nada del código las carga. Se quedan en local para no publicar
+# material de terceros en un repositorio público.
+*_referencia.jpg
+*_referencia.png
+
+# Caché de Vite
+.vite/

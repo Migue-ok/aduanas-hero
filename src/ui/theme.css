@@ -17,10 +17,14 @@
   --g-blur: blur(14px) saturate(1.25);
   --g-shadow: 0 18px 48px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255, 255, 255, 0.07) inset;
 
-  /* Tinta */
+  /* Tinta.
+     `--t-low` subió de #7d8ea1 a #9aabbe al VER el juego en pantalla: sobre el
+     cristal, y con una terminal de aeropuerto muy iluminada detrás, el gris
+     original dejaba los encabezados de panel y el texto secundario al borde de
+     lo ilegible. El problema de contraste no era solo del móvil. */
   --t-hi: #f2f6fa;
-  --t-mid: #b9c6d4;
-  --t-low: #7d8ea1;
+  --t-mid: #c3cfdc;
+  --t-low: #9aabbe;
 
   /* Acentos */
   --a-amber: #e0952a;
@@ -155,11 +159,16 @@
    cristal. Solo se tocan superficie, tipografía y profundidad: ni una posición.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* — Barras superiores de los tres niveles — */
+/* — Barras superiores de los tres niveles —
+   El degradado se apaga muy rápido y el texto quedaba flotando sobre el techo
+   iluminado de la terminal. Se alarga la caída y se sube la tinta: los datos de
+   turno y reputación son lo primero que el jugador busca. */
 .topbar, #port-hud .ph-topbar, #raid-hud .rh-topbar {
-  background: linear-gradient(180deg, rgba(8, 12, 18, 0.82), rgba(8, 12, 18, 0)) !important;
+  background: linear-gradient(180deg, rgba(6, 10, 16, 0.92) 0%, rgba(6, 10, 16, 0.72) 55%, rgba(6, 10, 16, 0)) !important;
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   font-family: var(--f-data);
+  color: #cfdae7;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
   border-bottom: 1px solid rgba(148, 176, 208, 0.08);
 }
 
@@ -195,8 +204,10 @@
   border-radius: 4px; font-family: var(--f-data); font-weight: 700;
 }
 
-/* — Botones: un solo lenguaje táctico en todo el juego — */
-.dock button, .panel button, #btn-start, .sheet button,
+/* — Botones: un solo lenguaje táctico en todo el juego —
+   `#interrogatorio` y `.doc` se excluyen: sus botones son tinta sobre su propia
+   tarjeta y heredar el cristal oscuro los volvía ilegibles. */
+.dock button, .panel:not(#interrogatorio) button, #btn-start, .sheet button,
 #port-hud .ph-start-btn, #port-hud .ph-exit, #port-hud .ph-summary-card button,
 #raid-hud .rh-start-btn, #raid-hud .rh-exit, #raid-hud .rh-final-card button,
 #consecuencia .continuar {
@@ -207,16 +218,67 @@
   border: 1px solid var(--g-border) !important; border-radius: var(--r-sm);
   transition: border-color .18s, color .18s, transform .09s, box-shadow .18s;
 }
-.dock button:hover, .panel button:hover, #btn-start:hover, .sheet button:hover,
+.dock button:hover, .panel:not(#interrogatorio) button:hover, #btn-start:hover, .sheet button:hover,
 #port-hud .ph-start-btn:hover, #raid-hud .rh-start-btn:hover, #consecuencia .continuar:hover {
   border-color: var(--g-border-hot) !important; color: #fff !important;
   box-shadow: 0 0 0 1px var(--g-border-hot), 0 10px 30px rgba(224,149,42,.16);
 }
 .dock button:active, .panel button:active { transform: translateY(1px) scale(.985); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEGIBILIDAD TÁCTIL — el cristal es precioso en un monitor y una trampa en un
+   teléfono al sol. Tres motivos por los que el HUD se volvía ilegible en móvil:
+     1. `backdrop-filter` se ignora o se degrada en varios navegadores Android,
+        dejando superficies al 62 % de opacidad sobre una terminal MUY clara.
+     2. Con `pixelRatio` recortado a 1.25 el texto fino pierde masa.
+     3. El desenfoque cuesta GPU justo donde menos sobra.
+   Solución: en punteros gruesos las superficies pasan a ser casi opacas, los
+   bordes suben de contraste y la tinta se aclara. El look táctico se conserva.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Los tokens táctiles se declaran UNA vez y se aplican por dos vías: el media
+   query real (dispositivo con dedo) y la clase `qa-tactil` que pone `?touch=1`
+   (revisión desde escritorio — ver la nota larga en `core/Device.js`). */
+@media (pointer: coarse) {
+  :root {
+    --g-bg: rgba(9, 14, 22, 0.94);
+    --g-bg-solid: rgba(6, 10, 17, 0.975);
+    --g-border: rgba(150, 180, 216, 0.34);
+    --g-border-hot: rgba(240, 172, 62, 0.75);
+    --g-blur: blur(12px) saturate(1.15);
+    --t-hi: #ffffff;
+    --t-mid: #d3ddea;
+    --t-low: #b0c0d1;
+    --a-amber: #f5b544;   /* +contraste sobre negro que el ámbar institucional */
+  }
+  /* Sin desenfoque disponible NO puede quedar ni un pixel translúcido. */
+  @supports not (backdrop-filter: blur(1px)) {
+    :root { --g-bg: rgba(9, 14, 22, 0.985); --g-bg-solid: rgba(6, 10, 17, 0.995); }
+  }
+  .g-btn, .dock button, .panel button, .sheet button { min-height: 52px; }
+}
+
+body.qa-tactil {
+  --g-bg: rgba(9, 14, 22, 0.94);
+  --g-bg-solid: rgba(6, 10, 17, 0.975);
+  --g-border: rgba(150, 180, 216, 0.34);
+  --g-border-hot: rgba(240, 172, 62, 0.75);
+  --g-blur: blur(12px) saturate(1.15);
+  --t-hi: #ffffff;
+  --t-mid: #d3ddea;
+  --t-low: #b0c0d1;
+  --a-amber: #f5b544;
+}
+body.qa-tactil .g-btn,
+body.qa-tactil .dock button,
+body.qa-tactil .panel button,
+body.qa-tactil .sheet button { min-height: 52px; }
 #raid-hud .rh-start-btn { background: linear-gradient(180deg, #d8262c, #a81c22) !important; border-color: rgba(255,120,110,.5) !important; }
 
-/* — Paneles laterales del aeropuerto y tarjetas de resumen — */
-.panel, #expediente, #ficha, #port-hud .ph-check {
+/* — Paneles laterales del aeropuerto y tarjetas de resumen —
+   OJO: `#interrogatorio` y `#documentos` quedan FUERA a propósito. Ambos tienen
+   identidad propia en style.css y este `!important` les pisaba el fondo dejando
+   su tinta oscura sobre cristal oscuro (ilegible, sobre todo en móvil). */
+.panel:not(#interrogatorio):not(#documentos), #expediente, #ficha, #port-hud .ph-check {
   background: var(--g-bg) !important;
   -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
   border: 1px solid var(--g-border) !important;

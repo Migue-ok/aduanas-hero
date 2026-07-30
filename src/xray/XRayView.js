@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { bus, Señal } from '../core/EventBus.js';
+import { audio } from '../audio/AudioEngine.js';
 
 /**
  * XRayView — el monitor donde la maleta confiesa
@@ -93,8 +94,11 @@ const MONITOR_SHADER = {
   vertex: ITEM_SHADER.vertex,
   fragment: /* glsl */ `
     uniform float uTime;
+    uniform float uChispa;   // 0..1 · descarga provocada, la decae GSAP desde JS
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float hash1(float x) { return fract(sin(x * 127.1) * 43758.5453); }
+
     void main() {
       // Scanlines + ruido electrónico + viñeta de tubo, en aditivo sobre la imagen.
       float scan = sin(vUv.y * 700.0) * 0.03;
@@ -103,7 +107,56 @@ const MONITOR_SHADER = {
       float vig = smoothstep(0.75, 0.35, dot(c, c));
       float sweep = smoothstep(0.0, 0.02, abs(fract(uTime * 0.11) - vUv.y)) * 0.0 +
                     (1.0 - smoothstep(0.0, 0.03, abs(fract(uTime * 0.11) - vUv.y))) * 0.06;
-      gl_FragColor = vec4(vec3(0.55, 0.85, 1.0) * (scan + noise + sweep), 1.0 - vig);
+
+      // ── CHISPAS DEL TUBO ──────────────────────────────────────────────
+      // Un equipo de rayos X de aduana lleva años encendido y ARQUEA. Aquí no
+      // hay partículas ni geometría: la descarga se dibuja en el mismo pase de
+      // monitor, que es donde ocurre de verdad (es el tubo, no la sala).
+      //
+      // Dos fuentes. La primera es ambiental: el tiempo se trocea en ventanas
+      // de ~0.7 s y en cada una se sortea una banda horizontal; solo el 18 %
+      // de las ventanas sale premiada, así que el latigazo es raro e
+      // impredecible — si saltara siempre dejaría de leerse como una avería.
+      float ranura = floor(uTime * 1.4);
+      float suerte = hash1(ranura);
+      float yBanda = hash1(ranura + 11.0);
+      float vida = fract(uTime * 1.4);
+      float decae = (1.0 - vida) * (1.0 - vida);
+      float ambiental = step(0.82, suerte) * decae;
+
+      // La segunda es provocada: al cambiar de contraste o marcar una silueta,
+      // el tubo acusa el golpe y la descarga BARRE la pantalla de abajo arriba.
+      float yPulso = 1.0 - uChispa;
+
+      // La descarga tiene DOS partes, y esto no es un capricho estético: el
+      // fondo del monitor es el "aire" de la maleta, casi blanco (#dfe8f2).
+      // Un destello blanco sobre blanco no se ve. Lo que sí ocurre de verdad en
+      // un tubo que arquea es PÉRDIDA DE SEÑAL: una banda oscura con un núcleo
+      // incandescente dentro. Esa combinación se lee sobre cualquier fondo.
+      float haloA = (1.0 - smoothstep(0.0, 0.022 + suerte * 0.01, abs(vUv.y - yBanda))) * ambiental;
+      float nucA  = (1.0 - smoothstep(0.0, 0.0028, abs(vUv.y - yBanda))) * ambiental;
+      float haloP = (1.0 - smoothstep(0.0, 0.045, abs(vUv.y - yPulso))) * uChispa;
+      float nucP  = (1.0 - smoothstep(0.0, 0.004, abs(vUv.y - yPulso))) * uChispa;
+
+      float halo = clamp(haloA + haloP, 0.0, 1.0);
+      float nucleo = clamp(nucA + nucP, 0.0, 1.0);
+      // Una descarga no es una línea limpia: motas incandescentes sobre la banda.
+      float mota = step(0.981, hash(vec2(vUv.x * 240.0, ranura))) * halo;
+
+      vec3 col = vec3(0.55, 0.85, 1.0) * (scan + noise + sweep);
+      float alfa = 1.0 - vig;
+
+      // 1) Caída de señal: la banda se traga la imagen.
+      col = mix(col, vec3(0.03, 0.07, 0.14), halo);
+      alfa = max(alfa, halo * 0.8);
+      // 2) El núcleo quema por encima de todo.
+      col = mix(col, vec3(0.88, 0.97, 1.0), nucleo);
+      alfa = max(alfa, nucleo);
+      // 3) Salpicadura incandescente a lo largo del arco.
+      col = mix(col, vec3(1.0), mota * 0.85);
+      alfa = max(alfa, mota * 0.9);
+
+      gl_FragColor = vec4(col, clamp(alfa, 0.0, 1.0));
     }
   `,
 };
@@ -125,7 +178,7 @@ export class XRayView {
     const overlay = new THREE.Mesh(
       new THREE.PlaneGeometry(2, 2),
       new THREE.ShaderMaterial({
-        uniforms: { uTime: { value: 0 } },
+        uniforms: { uTime: { value: 0 }, uChispa: { value: 0 } },
         vertexShader: MONITOR_SHADER.vertex,
         fragmentShader: MONITOR_SHADER.fragment,
         transparent: true,
@@ -174,6 +227,7 @@ export class XRayView {
     // Entrada de la maleta por la banda: desliza desde la izquierda.
     this.bag.position.x = -1.2;
     gsap.to(this.bag.position, { x: 0, duration: 1.6, ease: 'power2.out' });
+    this.chispazo(0.7); // el tubo se enciende con un chasquido
     bus.emit(Señal.ESCANEO_INICIADO, { caso_id: caso.id });
   }
 
@@ -213,6 +267,21 @@ export class XRayView {
   setContraste(modo) {
     this.contraste = modo;
     for (const m of this.itemMeshes) m.material.uniforms.uContraste.value = modo;
+    this.chispazo(); // cambiar de filtro exige potencia: el tubo se queja
+  }
+
+  /**
+   * Descarga eléctrica del tubo. Se dispara al cambiar de contraste, al marcar
+   * una silueta y al arrancar el escaneo — los tres momentos en los que el
+   * equipo pide un pico de corriente. El barrido lo dibuja el shader del
+   * monitor; aquí solo se empuja el uniform y se le deja caer.
+   */
+  chispazo(fuerza = 1) {
+    const u = this.overlay.material.uniforms.uChispa;
+    gsap.killTweensOf(u);
+    u.value = fuerza;
+    gsap.to(u, { value: 0, duration: 0.34, ease: 'power2.in', overwrite: true });
+    audio.chispa();
   }
 
   #bindInput() {
@@ -253,6 +322,7 @@ export class XRayView {
     if (mesh.userData.marcada) return;
     mesh.userData.marcada = true;
     mesh.material.uniforms.uMarcada.value = 1;
+    this.chispazo(0.85); // marcar dispara el realce: pico de corriente
     bus.emit(Señal.SILUETA_MARCADA, {
       caso_id: this.caso.id,
       etiqueta: mesh.userData.etiqueta,

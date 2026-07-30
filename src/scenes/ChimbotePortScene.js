@@ -6,16 +6,45 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { spawnRig, clearRigCache } from '../world/Rig.js';
 import { quality, isTouch, tuneRaycaster } from '../core/Device.js';
 import { TouchControls } from '../ui/TouchControls.js';
-import { CameraShake, HitStop, popIn, punch, flash } from '../core/Juice.js';
+import { CameraShake, HitStop, punch, flash } from '../core/Juice.js';
 import { PostFX } from '../render/PostFX.js';
 import { PauseMenu } from '../ui/PauseMenu.js';
-import { PerfGuard } from '../core/PerfGuard.js';
+import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.js';
 import { construirPuerto } from '../world/PuertoChimbote.js';
 import { progreso } from '../core/Progreso.js';
-import { disposeScene, disposeObject } from '../core/Disposal.js';
+import { disposeObject, cerrarNivel } from '../core/Disposal.js';
+import { hornearEntorno } from '../render/Entorno.js';
 import { audio } from '../audio/AudioEngine.js';
 import { narrator } from '../audio/Narrator.js';
 import { makeGooglyEyes } from '../world/GooglyEyes.js';
+import { coach } from '../ui/JustusCoach.js';
+import { abrirHidden, cerrarHidden, abrirVelo, cerrarVelo, cascada } from '../ui/Paneles.js';
+
+/**
+ * La clase del muelle. Justus no baja del coche en Chimbote (no es su terreno),
+ * pero habla por la radio: mismo mentor, mismo tono, controles distintos según
+ * el jugador tenga dedos o teclado.
+ */
+const leccionPuerto = (touch) => [
+  {
+    txt: touch
+      ? '¡Jefe, aquí Justus por radio! El muelle es grande y el turno corto. Con el JOYSTICK de la izquierda camina; arrastre el dedo en la mitad derecha de la pantalla para girar la vista.'
+      : '¡Jefe, aquí Justus por radio! El muelle es grande y el turno corto. Muévase con W-A-S-D, mire con el ratón y salte con la barra espaciadora.',
+    foco: touch ? '.tp-stick' : null,
+  },
+  {
+    txt: touch
+      ? 'Cinco contenedores precintados. Póngase delante de uno y pulse ABRIR: las puertas baten y puede entrar. Dentro está oscuro — la linterna se enciende sola.'
+      : 'Cinco contenedores precintados. Póngase delante de uno y pulse la tecla E: las puertas baten y puede entrar. Dentro está oscuro — la linterna se enciende sola.',
+    foco: touch ? '.tp-btn' : null,
+  },
+  {
+    txt: 'Dentro hay cajas, barriles y palets. Apunte con la mira del centro a una caja sospechosa y ábrala con palanca, o pásele el RAYOS X portátil si prefiere no romper el precinto.',
+  },
+  {
+    txt: 'Después decida: DECOMISAR si hay contrabando, LIBERAR si la carga es limpia. Cruce siempre lo que ve con el manifiesto — un peso que no cuadra vale más que una corazonada. Vaya, jefe.',
+  },
+];
 
 /**
  * ChimbotePortScene (ADR-006 · Fase 2 pulida) — Nivel 2: Puerto de Chimbote.
@@ -89,11 +118,14 @@ export class ChimbotePortScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; // evita que la linterna reviente
-    this.renderer.toneMappingExposure = 0.88; // deja aire para el bloom
+    this.renderer.toneMappingExposure = 0.78; // deja aire para el bloom y evita recortar el hormigón
     this.renderer.setClearColor(0x9fb8cc);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0xb7c8d4, 30, 130);
+    // Niebla cálida de atardecer, no azul de mediodía nublado: es lo que ata el
+    // fondo lejano al cielo del HDRI y lo que le quita al hormigón el aspecto
+    // de nieve. El rango se mantiene para no tapar los contenedores del muelle.
+    this.scene.fog = new THREE.Fog(0xc7b39c, 34, 140);
 
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
     this.camera.position.set(0, P_R + EYE_OFF, DOCK_Z - 5);
@@ -119,7 +151,10 @@ export class ChimbotePortScene {
 
     // Post-proceso: las alarmas rojas, el oro del contrabando y el destello del
     // sol en el agua ahora IRRADIAN en vez de ser píxeles de color.
-    this.post = new PostFX(this.renderer, { scene: this.scene, camera: this.camera, bloom: 0.34 });
+    // 0.48 (antes 0.34): con la rodilla suave del umbral ya no hay riesgo de
+    // lavar el hormigón del muelle, así que las alarmas y el sol en el agua
+    // pueden permitirse brillar de verdad.
+    this.post = new PostFX(this.renderer, { scene: this.scene, camera: this.camera, bloom: 0.48 });
 
     // Pausa/ajustes: por fin se puede silenciar al narrador y salir sin recargar.
     this.pausa = new PauseMenu({
@@ -136,26 +171,43 @@ export class ChimbotePortScene {
     });
     this.pausa.mount();
 
-    // Red de seguridad de FPS: recortes de un solo sentido, del más barato al
-    // más doloroso (el muelle es la escena más pesada del juego).
+    // Red de seguridad de FPS: recortes de un solo sentido, del que más frames
+    // devuelve al que más duele (el muelle es la escena más pesada del juego).
+    //
+    // El orden cambió: el ratio de píxeles va PRIMERO. Antes cerraba la lista,
+    // detrás de dos escalones que en móvil no hacían absolutamente nada — la
+    // sombra de la linterna ya nace apagada en teléfono (`#buildFlashlight`) y
+    // el bloom ni se crea (`PostFX`) — así que el único recorte que de verdad
+    // devolvía frames tardaba tres ventanas enteras en llegar. Ahora esos dos
+    // devuelven `false` y el guardián salta al siguiente sin gastar espera.
     this.perf = new PerfGuard([
-      { nombre: 'sombra de linterna off', aplicar: () => { this.flash.castShadow = false; } },
-      { nombre: 'bloom off', aplicar: () => { if (this.post.bloom) this.post.bloom.enabled = false; } },
-      { nombre: 'sombras del sol off', aplicar: () => {
-        const sun = this.scene.children.find((o) => o.isDirectionalLight);
-        if (sun) sun.castShadow = false;
+      recorteRatioPixel(this.renderer, this.post),
+      { nombre: 'sombra de linterna off', aplicar: () => {
+        if (!this.flash.castShadow) return false;
+        this.flash.castShadow = false;
+        this.flash.shadow?.dispose();
+        return true;
       } },
-      { nombre: 'pixelRatio 1', aplicar: () => {
-        this.renderer.setPixelRatio(1);
-        this.post.setSize(window.innerWidth, window.innerHeight);
+      { nombre: 'bloom off', aplicar: () => {
+        if (!this.post.bloom?.enabled) return false;
+        this.post.bloom.enabled = false;
+        return true;
       } },
+      recorteSombras(() => this.scene.children.filter((o) => o.isDirectionalLight)),
     ]);
 
     this.clock = new THREE.Clock();
     this.#loop();
+
+    // Justus abre el turno explicando el mando. Arriba, no abajo: el joystick y
+    // los botones que está enseñando viven justo en el borde inferior.
+    setTimeout(() => {
+      if (this.scene) coach.guiar('chimbote', leccionPuerto(isTouch), { pos: 'arriba' });
+    }, 1200);
   }
 
   unmount() {
+    coach.destroy();
     if (this._raf) cancelAnimationFrame(this._raf);
     window.removeEventListener('resize', this._bound.resize);
     window.removeEventListener('keydown', this._bound.keydown);
@@ -163,17 +215,27 @@ export class ChimbotePortScene {
     document.removeEventListener('mousedown', this._bound.mousedown);
     this.controls?.disconnect?.();
     for (const t of this._voces ?? []) clearTimeout(t);
+    // Los cierres pendientes de los avisos también: si sobreviven al
+    // desmontaje disparan `cerrarHidden` sobre nodos que `this.overlay.remove()`
+    // acaba de sacar del DOM, y cada uno de esos cierres crea a su vez su propio
+    // temporizador de respaldo dentro de `Paneles` — una cadena de basura que
+    // arranca justo cuando el nivel debería estar muerto.
+    clearTimeout(this._toastT);
+    clearTimeout(this._scanT);
     narrator.callar();
     this.pausa?.destroy();
     this.pad?.destroy();
     this.overlay?.remove();
     this._styleEl?.remove();
     // Liberar VRAM de verdad: `scene.remove()` NO libera nada (ADR-009).
-    this.post?.dispose();
-    disposeScene(this.scene);
+    // `cerrarNivel` fija el orden (post → escena → renderer) y mide el residuo
+    // en el único punto donde el contador todavía dice la verdad. Sin
+    // `forceContextLoss`: el canvas se comparte entre niveles.
+    // La caché de rigs se vacía ANTES que el renderer y no después: una textura
+    // liberada tras `renderer.dispose()` ya no llega a `_gl.deleteTexture` y se
+    // queda de verdad en la GPU (ver `disposeRenderer`).
     clearRigCache();
-    this.renderer?.dispose();
-    this.renderer?.forceContextLoss?.();
+    cerrarNivel(this.renderer, { escenas: [this.scene], post: this.post, etiqueta: 'Chimbote' });
     this.scene = null; this.world = null; this.inspectables.length = 0;
     this.crateMeshes.length = 0; this.animals.length = 0; this.npcs = [];
   }
@@ -241,8 +303,13 @@ export class ChimbotePortScene {
   // ── Luces ─────────────────────────────────────────────────────────────────
   #buildLights() {
     // Hemisférica baja: el exterior lo lleva el sol; el interior queda en sombra.
-    this.scene.add(new THREE.HemisphereLight(0xbcd2e2, 0x4a5a64, 0.55));
-    const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+    // Sol + cielo REBAJADOS. Con el HDRI ya iluminando el muelle (IBL), sumar
+    // encima un hemisférico a 0.55 y un direccional a 1.5 hacía que el hormigón
+    // se fuera a blanco puro y perdiera toda su textura: no era "un puerto muy
+    // soleado", era recorte. Ahora la losa conserva su grano y las sombras de
+    // los contenedores se leen.
+    this.scene.add(new THREE.HemisphereLight(0xbcd2e2, 0x4a5a64, 0.32));
+    const sun = new THREE.DirectionalLight(0xfff4e0, 0.95);
     sun.position.set(-30, 44, 24);
     sun.castShadow = true;
     sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
@@ -281,14 +348,43 @@ export class ChimbotePortScene {
   #buildDock() {
     // Concreto PBR real (ambientCG, CC0) + HDRI de puerto al atardecer (Poly Haven).
     new RGBELoader().load('/hdri/puerto.hdr', (hdr) => {
+      // El HDRI pesa ~1 MB y tarda: si el jugador ya salió al menú, esto se
+      // ejecutaba sobre `this.scene === null` (lo pone el `unmount`) y reventaba
+      // con un TypeError. Y en cuanto el entorno se hornea, escribirlo sobre una
+      // escena muerta sería además una fuga de VRAM que nadie iría a recoger.
+      if (!this.scene) { hdr.dispose(); return; }
       hdr.mapping = THREE.EquirectangularReflectionMapping;
-      this.scene.environment = hdr;
-      this.scene.environmentIntensity = 0.5;
+      // El HDRI del atardecer se usaba SOLO para iluminar; el cielo era un color
+      // plano azul pálido y la niebla del mismo tono, así que el muelle entero se
+      // leía como un campo de nieve en vez de como un puerto pesquero al caer la
+      // tarde. Ahora el propio HDRI es el fondo: aparece el cielo real, con su
+      // gradiente y sus nubes, y los reflejos de los contenedores por fin tienen
+      // algo que reflejar. Un poco de desenfoque disimula que es un HDRI de 2k
+      // estirado a pantalla completa.
+      //
+      // Se hornea con `hornearEntorno` en vez de asignar el HDRI crudo: así el
+      // PMREM lo fabricamos y lo liberamos nosotros, y el renderer no se queda
+      // con su generador perezoso (11 geometrías y ~6 MB imposibles de soltar
+      // después — el porqué completo está en `render/Entorno.js`).
+      // `environmentIntensity` a 0.62: con el entorno a la mitad, el
+      // `envMapIntensity` que se subió en los contenedores no tenía nada que
+      // multiplicar.
+      hornearEntorno(this.scene, this.renderer, hdr, {
+        intensidad: 0.62,
+        comoFondo: true,
+        desenfoque: 0.22,
+        brilloFondo: 0.85,
+      });
     });
     const tl = new THREE.TextureLoader();
+    // El muelle mide 64 × 52 m. Con `repeat` a 10×8 cada baldosa de textura
+    // cubría 6.4 m: el hormigón quedaba liso como una pista de hielo y, al
+    // caminar, no había NADA en el suelo que diera sensación de avance. A 28×24
+    // cada baldosa cubre ~2.3 m, se ve el grano y el paso se siente.
     const rep = (t, srgb = false) => {
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      t.repeat.set(10, 8);
+      t.repeat.set(28, 24);
+      t.anisotropy = quality.mobile ? 4 : 8; // sin esto, el suelo en fuga se emborrona
       if (srgb) t.colorSpace = THREE.SRGBColorSpace;
       return t;
     };
@@ -452,7 +548,15 @@ export class ChimbotePortScene {
       const grupo = new THREE.Group();
       grupo.position.copy(pos);
       const tono = PALETA[(i * 3 + 1) % PALETA.length];
-      const extMat = new THREE.MeshStandardMaterial({ color: tono, roughness: 0.6, metalness: 0.15 });
+      // Acero PINTADO, que es lo que es un contenedor: la metalicidad se queda
+      // baja (subirla lo convertiría en cromo y en una mentira física), pero se
+      // baja la rugosidad y se sube `envMapIntensity` para que el HDRI del
+      // puerto se lea de verdad en las caras superiores. Ahí es donde se ve el
+      // reflejo del cielo del atardecer, y es lo que separa "caja de color" de
+      // "chapa de dos toneladas al sol".
+      const extMat = new THREE.MeshStandardMaterial({
+        color: tono, roughness: 0.44, metalness: 0.28, envMapIntensity: 1.35,
+      });
       const intMat = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.95 });
 
       // Cascarón hueco: suelo, techo, fondo y dos costados. FRENTE ABIERTO (+z).
@@ -490,7 +594,10 @@ export class ChimbotePortScene {
       forro(C_L - 0.1, C_W - 0.1, Math.PI / 2, 0, 0, C_H - SEP, 0);             // techo
 
       // Puertas en la cara frontal (+z), bisagra en los cantos, baten hacia afuera.
-      const puertaMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tono).offsetHSL(0, 0, -0.14), roughness: 0.5, metalness: 0.25 });
+      const puertaMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(tono).offsetHSL(0, 0, -0.14),
+        roughness: 0.4, metalness: 0.34, envMapIntensity: 1.35,
+      });
       const mkPuerta = (lado) => {
         const pivot = new THREE.Group();
         pivot.position.set(lado * (C_L / 2), C_H / 2, C_W / 2);
@@ -581,7 +688,10 @@ export class ChimbotePortScene {
       // (rondas altas), no se ponen: hay que cazarlo con los rayos X.
       const flejes = [];
       if (esSosp && !insp.caso.disimulado) {
-        const flejeMat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.4, metalness: 0.8 });
+        // Fleje de acero desnudo: aquí sí, metal de verdad y espejo del cielo.
+        const flejeMat = new THREE.MeshStandardMaterial({
+          color: 0x9a9a9a, roughness: 0.26, metalness: 0.92, envMapIntensity: 1.5,
+        });
         for (const fx of [-s * 0.3, s * 0.3]) {
           const fleje = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, s * 1.03), flejeMat);
           fleje.position.set(fx, h / 2, 0);
@@ -910,6 +1020,13 @@ export class ChimbotePortScene {
       // Migración a rig (KayKit Barbarian: el estibador fornido). Async; el
       // googly procedural queda de fallback hasta que llega el GLB.
       spawnRig('/models/Estibador.glb', { targetHeight: 1.9 }).then((rig) => {
+        // `clear()` solo DESENGANCHA: el estibador procedural quedaba huérfano
+        // fuera del grafo, así que `disposeScene` no volvía a verlo nunca y su
+        // VRAM sobrevivía al nivel entero. Eran 9 geometrías por estibador
+        // (cápsula del cuerpo, cabeza, casco, ala, piernas y las cuatro esferas
+        // de los ojos googly) × 3 = 27 — medidas una a una, y exactamente todo
+        // el residuo de geometrías que quedaba tras cerrar el muelle.
+        for (const hijo of [...npc.g.children]) disposeObject(hijo);
         npc.g.clear();
         npc.googly = null;
         npc.body = null;
@@ -921,6 +1038,17 @@ export class ChimbotePortScene {
   }
 
   // ── HUD ───────────────────────────────────────────────────────────────────
+  /**
+   * Nota sobre el marcado: `.ph-summary-card` nace con `hidden` igual que su
+   * velo, y no sobra. `abrirPanel` decide si anima mirando si la clase de
+   * ocultación estaba puesta (`ui/Paneles.js:45`); sin ella, el `abrirHidden`
+   * del resumen entraba por la rama de refresco y la tarjeta aparecía de golpe
+   * — la animación estaba escrita y no se ejecutaba nunca.
+   *
+   * Y un aviso: el HTML y el CSS de este método son template literals. Un
+   * backtick dentro de un comentario, aunque sea un comentario HTML o CSS,
+   * cierra la cadena y rompe el build. Los comentarios largos, aquí fuera.
+   */
   #buildHUD() {
     const el = document.createElement('div');
     el.id = 'port-hud';
@@ -945,7 +1073,7 @@ export class ChimbotePortScene {
             : '<b>WASD</b> caminar · <b>Espacio</b> saltar · <b>E</b> abrir contenedor · <b>Clic</b> abrir caja · <b>X</b> rayos X'}</p>
         </div>
       </div>
-      <div class="ph-summary hidden"><div class="ph-summary-card"></div></div>`;
+      <div class="ph-summary hidden"><div class="ph-summary-card hidden"></div></div>`;
     document.body.appendChild(el);
     this.overlay = el;
     this.$stats = el.querySelector('.ph-stats');
@@ -977,7 +1105,7 @@ export class ChimbotePortScene {
       if (isTouch) {
         // Sin PointerLock en móvil: entramos en juego con nuestro interruptor.
         this.touchPlaying = true;
-        this.$start.classList.add('hidden');
+        cerrarVelo(this.$start, { duration: 0.32 });
         this.pad.setVisible(true);
       } else {
         this.controls.lock();
@@ -987,9 +1115,14 @@ export class ChimbotePortScene {
         + 'Entra, alumbra con tu linterna y abre las cajas: el contrabando no se declara solo.', 700);
     });
     el.querySelector('.ph-exit').addEventListener('click', () => this.onExit());
-    this.controls.addEventListener('lock', () => this.$start.classList.add('hidden'));
+    // La portada del muelle va y viene MUCHO: cada Esc suelta el puntero y la
+    // devuelve, cada clic la retira. Con `classList` esos dos caminos eran
+    // asimétricos y, al alternar rápido, el respaldo de un cierre en vuelo
+    // ocultaba una portada recién repuesta (o al revés). Por el sistema, la
+    // apertura cancela el cierre pendiente y el par queda simétrico.
+    this.controls.addEventListener('lock', () => cerrarVelo(this.$start, { duration: 0.32 }));
     this.controls.addEventListener('unlock', () => {
-      if (!isTouch && !this.#terminado()) this.$start.classList.remove('hidden');
+      if (!isTouch && !this.#terminado()) abrirVelo(this.$start, { duration: 0.36 });
     });
     this.#updateStats();
     this.#injectStyles();
@@ -1016,12 +1149,26 @@ export class ChimbotePortScene {
 
   #toast(msg, bad = false) {
     this.#narrar(msg); // todo aviso importante ahora también se escucha
-    this.$toast.className = 'ph-toast ' + (bad ? 'bad' : 'ok');
+    // El color del aviso se cambia con `classList`, NO reescribiendo `className`.
+    //
+    // Parece cosmético y era el bug: `className = 'ph-toast ok'` borra de paso
+    // la clase `hidden`, y `abrirPanel` decide si anima mirando justo eso
+    // (`estabaOculto = el.classList.contains(clase)`, ui/Paneles.js:45). Al
+    // llegar ya sin `hidden`, el panel se daba por abierto y tomaba la rama de
+    // "refresco de contenido": `clearProps` y salir. Resultado: el aviso del
+    // muelle NUNCA llegó a hacer su entrada con rebote — aparecía de golpe —
+    // mientras el código de al lado juraba lo contrario.
+    //
+    // Y hay una segunda víctima: quitar `hidden` a mano se salta la cancelación
+    // del cierre en vuelo que hace `abrirPanel`, así que un aviso que llegara
+    // dentro de los 270 ms de salida del anterior se lo llevaba por delante el
+    // respaldo del cierre viejo.
+    this.$toast.classList.remove('ok', 'bad');
+    this.$toast.classList.add(bad ? 'bad' : 'ok');
     this.$toast.innerHTML = msg;
-    this.$toast.classList.remove('hidden');
-    popIn(this.$toast); // ya no aparece de la nada: entra con rebote elástico
+    abrirHidden(this.$toast, { y: 14, scale: 0.92, duration: 0.44, sfx: false });
     clearTimeout(this._toastT);
-    this._toastT = setTimeout(() => this.$toast.classList.add('hidden'), 4200);
+    this._toastT = setTimeout(() => cerrarHidden(this.$toast), 4200);
   }
 
   #injectStyles() {
@@ -1054,15 +1201,23 @@ export class ChimbotePortScene {
       #port-hud .hidden { display: none !important; }
       #port-hud .ph-start, #port-hud .ph-summary { position: absolute; inset: 0; display: flex; align-items: center;
         justify-content: center; pointer-events: auto;
-        background: radial-gradient(900px 600px at 50% 40%, rgba(20,32,44,.62), rgba(4,8,12,.88)); }
-      #port-hud .ph-start-inner, #port-hud .ph-summary-card { text-align: center; max-width: 520px; }
-      #port-hud .ph-start-title { letter-spacing: .3em; color: #e0952a; margin-bottom: 12px; font-size: 15px; }
-      #port-hud .ph-start-inner p { color: #b7c3cf; line-height: 1.6; }
+        background: radial-gradient(900px 600px at 50% 40%, rgba(14,24,36,.80), rgba(3,6,10,.93)); }
+      /* TARJETA de verdad, no texto suelto. El velo radial es claro en el centro
+         y ahí es justo donde caían las frases, encima de contenedores de colores
+         vivos: se leía fatal. Mismo cristal que el resto del HUD. */
+      #port-hud .ph-start-inner, #port-hud .ph-summary-card { text-align: center; max-width: 520px;
+        background: linear-gradient(160deg, rgba(15,24,37,.95), rgba(6,10,17,.97));
+        -webkit-backdrop-filter: blur(12px) saturate(1.15); backdrop-filter: blur(12px) saturate(1.15);
+        border: 1px solid rgba(150,180,216,.26); border-radius: 14px;
+        box-shadow: 0 26px 64px rgba(0,0,0,.72), 0 0 0 1px rgba(255,255,255,.04) inset;
+        padding: 30px 34px; }
+      #port-hud .ph-start-title { letter-spacing: .3em; color: #f5b544; margin-bottom: 14px; font-size: 15px; }
+      #port-hud .ph-start-inner p { color: #d7e1ec; line-height: 1.6; }
       #port-hud .ph-start-btn { pointer-events: auto; cursor: pointer; margin: 22px 0 14px; background: transparent;
         color: #eef4f8; border: 1px solid #e0952a; padding: 14px 30px; font-family: inherit; letter-spacing: .18em; font-size: 16px; border-radius: 4px; }
       #port-hud .ph-start-btn:hover { background: #e0952a; color: #10151b; }
-      #port-hud .ph-keys { font-size: 12px; color: #7f8c99 !important; }
-      #port-hud .ph-keys b { color: #cdd8e2; }
+      #port-hud .ph-keys { font-size: 12px; color: #9aa8b6 !important; }
+      #port-hud .ph-keys b { color: #eaf1f8; }
       #port-hud .ph-summary-card { color: #eef4f8; }
       #port-hud .ph-summary-card h2 { color: #e0952a; letter-spacing: .2em; }
       #port-hud .ph-summary-card p { color: #b7c3cf; line-height: 1.7; }
@@ -1073,7 +1228,8 @@ export class ChimbotePortScene {
       @media (pointer: coarse) {
         #port-hud .ph-start-inner, #port-hud .ph-summary-card {
           max-width: min(520px, 92vw); width: 100%; display: flex; flex-direction: column;
-          align-items: center; gap: clamp(6px, 1.4vh, 14px); margin: auto; }
+          align-items: center; gap: clamp(6px, 1.4vh, 14px); margin: auto;
+          padding: clamp(16px, 2.6vh, 26px) clamp(14px, 4vw, 30px); }
         #port-hud .ph-start, #port-hud .ph-summary { overflow-y: auto; padding: clamp(12px,3vh,30px) clamp(12px,4vw,36px); }
         #port-hud .ph-start-title { font-size: clamp(11px, 1.9vw, 15px); letter-spacing: .2em; margin: 0; }
         #port-hud .ph-start-inner p, #port-hud .ph-summary-card p {
@@ -1096,7 +1252,7 @@ export class ChimbotePortScene {
         #port-hud .ph-hint { bottom: auto; top: 62px; font-size: 11px; max-width: 92vw; text-align: center; line-height: 1.6; }
         #port-hud .ph-scan { top: 34%; font-size: 12px; max-width: 88vw; padding: 7px 10px; }
         #port-hud .ph-toast { top: 58px; max-width: 92vw; font-size: 12px; padding: 10px 14px; }
-        #port-hud .ph-start-inner, #port-hud .ph-summary-card { max-width: 92vw; padding: 0 14px; }
+        #port-hud .ph-start-inner, #port-hud .ph-summary-card { max-width: 92vw; padding: 18px 16px; }
         #port-hud .ph-start-inner p, #port-hud .ph-summary-card p { font-size: 13px; }
         #port-hud .ph-start-btn { min-height: 54px; padding: 15px 26px; font-size: 15px; }
         #port-hud .ph-summary-card button { min-height: 50px; }
@@ -1255,13 +1411,19 @@ export class ChimbotePortScene {
     const cr = this.aimCrate;
     if (!cr) return;
     audio.beep(!cr.esSosp);
+    // El equipo portátil también arquea al disparar: chasquido eléctrico,
+    // destello azulado y un tirón de cámara. Antes el escaneo era un texto que
+    // aparecía y un pitido; ahora se nota que una máquina acaba de trabajar.
+    audio.chispa(0.8);
+    flash('#bfe8ff', { opacidad: 0.16, duration: 0.26 });
+    this.shake.add(0.12);
     this.$scan.innerHTML = cr.esSosp
       ? 'RAYOS X · <b>siluetas densas no orgánicas</b> bajo la carga declarada.'
       : 'RAYOS X · densidades uniformes, consistentes con la carga. Sin anomalías.';
     if (cr.esSosp) cr.insp.caso.hallado = true;
-    this.$scan.classList.remove('hidden');
+    abrirHidden(this.$scan, { y: 16, scale: 0.92, duration: 0.42 });
     clearTimeout(this._scanT);
-    this._scanT = setTimeout(() => this.$scan.classList.add('hidden'), 3000);
+    this._scanT = setTimeout(() => cerrarHidden(this.$scan), 3000);
   }
 
   #decidir(decomisar) {
@@ -1278,7 +1440,7 @@ export class ChimbotePortScene {
       this.shake.add(0.72); this.hitStop.golpe(120); flash('#ff5a4a', { opacidad: 0.42, duration: 0.6 });
     }
     c.bulbo.material.emissiveIntensity = 0.1;
-    this.$hint.classList.add('hidden');
+    cerrarHidden(this.$hint, { y: 8, duration: 0.16 });
     this.activo = null;
     this.#updateStats();
 
@@ -1311,7 +1473,12 @@ export class ChimbotePortScene {
    */
   #nuevaRonda() {
     this.ronda += 1;
-    this.$summary.classList.add('hidden');
+    // La tarjeta se cierra con el velo: si se quedara «abierta» (sin `hidden`),
+    // el resumen de la ronda siguiente entraría por la rama de refresco y
+    // aparecería sin animación — el bucle de rondas convertiría el rebote en
+    // algo que solo se ve la primera vez.
+    cerrarHidden(this.$summaryCard, { y: 16, duration: 0.2 });
+    cerrarVelo(this.$summary, { duration: 0.28 });
     for (const insp of this.inspectables) {
       insp.caso = this.#genCaso();
       insp.opened = false;
@@ -1381,11 +1548,16 @@ export class ChimbotePortScene {
     btn.textContent = '◄ VOLVER AL MENÚ';
     btn.addEventListener('click', () => this.onExit());
     this.$summaryCard.appendChild(btn);
-    this.$summary.classList.remove('hidden');
+    // El velo entra plano (`abrirVelo` = fundido puro, sin y ni scale: escalar
+    // un contenedor a pantalla completa deja franjas sin cubrir) y la TARJETA
+    // con rebote.
+    abrirVelo(this.$summary, { duration: 0.5 });
+    abrirHidden(this.$summaryCard, { y: 30, scale: 0.88, duration: 0.58 });
+    cascada(this.$summaryCard.querySelectorAll('p, li, button'), { y: 16, stagger: 0.05 });
   }
 
   // ── Movimiento ────────────────────────────────────────────────────────────
-  #move() {
+  #move(dt = 1 / 60) {
     const b = this.playerBody;
     if (this.pausado || !this.#enJuego()) { b.velocity.x = 0; b.velocity.z = 0; return; }
     let fx = 0; let fz = 0;
@@ -1402,6 +1574,24 @@ export class ChimbotePortScene {
     const len = Math.hypot(vx, vz);
     if (len > 0.0001) { b.velocity.x = (vx / len) * SPEED; b.velocity.z = (vz / len) * SPEED; }
     else { b.velocity.x = 0; b.velocity.z = 0; }
+    this.#pasos(len > 0.0001, dt);
+  }
+
+  /**
+   * Pasos por DISTANCIA recorrida, no por temporizador. Un `setInterval` suena
+   * igual estés andando o parado contra una pared: aquí se acumula el avance
+   * real del cuerpo físico y solo suena cuando de verdad se ha cubierto una
+   * zancada. Empujar contra una caja no produce pasos, y el ritmo acompaña la
+   * velocidad sola. En el aire (saltando) no hay suelo que pisar.
+   */
+  #pasos(moviendo, dt) {
+    const b = this.playerBody;
+    if (!moviendo || !this.grounded) { this._zancada = Math.max(this._zancada ?? 0, 1.35); return; }
+    const v = Math.hypot(b.velocity.x, b.velocity.z);
+    this._zancada = (this._zancada ?? 0) + v * dt;
+    if (this._zancada < 1.45) return;
+    this._zancada = 0;
+    audio.paso(!!this.activo); // dentro de un contenedor, la chapa resuena
   }
 
   // ── Raycast de cajas bajo la mira ─────────────────────────────────────────
@@ -1423,9 +1613,9 @@ export class ChimbotePortScene {
       this.$prompt.innerHTML = isTouch
         ? '<kbd>TOCA</kbd> abrir con palanca · <kbd>📟</kbd> rayos X'
         : '<kbd>Clic</kbd> abrir con palanca · <kbd>X</kbd> rayos X';
-      this.$prompt.classList.remove('hidden');
+      abrirHidden(this.$prompt, { y: 10, scale: 0.94, duration: 0.3, sfx: false });
     } else {
-      this.$prompt.classList.add('hidden');
+      cerrarHidden(this.$prompt, { y: 8, duration: 0.16 });
     }
   }
 
@@ -1436,13 +1626,13 @@ export class ChimbotePortScene {
       // El hit-stop escala el tiempo del juego: un impacto CONGELA el mundo
       // unos ms y por eso se siente sólido (la cámara sigue sacudiéndose).
       const dtReal = Math.min(this.clock.getDelta(), 0.05);
-      this.perf.update(dtReal);
+      this.perf.update(); // se cronometra solo con el reloj de pared
       // En pausa el mundo se congela pero se SIGUE renderizando (parar el rAF
       // deja una imagen muerta y rompe las transiciones de GSAP).
       const dt = this.pausado ? 0 : this.hitStop.escala(dtReal);
       const t = this.clock.elapsedTime;
 
-      this.#move();
+      this.#move(dt);
       this.world.step(1 / 60, dt, 3);
       this.#actualizarGrounded(); // tras el step: contactos reales, no eventos
       const p = this.playerBody.position;
@@ -1459,9 +1649,9 @@ export class ChimbotePortScene {
         this.$hint.innerHTML = isTouch
           ? 'Abre las cajas y decide: <b>🚫 decomisar</b> · <b>✅ liberar</b>'
           : 'Abre las cajas y decide: <b><kbd>F</kbd> decomisar</b> · <b><kbd>G</kbd> liberar</b>';
-        this.$hint.classList.remove('hidden');
+        abrirHidden(this.$hint, { y: 12, scale: 0.94, duration: 0.34, sfx: false });
       } else if (!this.activo) {
-        this.$hint.classList.add('hidden');
+        cerrarHidden(this.$hint, { y: 8, duration: 0.16 });
       }
 
       this.#updateAim();
@@ -1481,9 +1671,9 @@ export class ChimbotePortScene {
       // Prompt de "abrir contenedor" cuando estoy cerca de uno cerrado y sin apuntar caja.
       if (this.#enJuego() && !this.aimCrate && this.#contenedorCercano()) {
         this.$prompt.innerHTML = isTouch ? '<kbd>🚪</kbd> Abrir contenedor' : '<kbd>E</kbd> Abrir contenedor';
-        this.$prompt.classList.remove('hidden');
+        abrirHidden(this.$prompt, { y: 10, scale: 0.94, duration: 0.3, sfx: false });
       } else if (!this.aimCrate) {
-        this.$prompt.classList.add('hidden');
+        cerrarHidden(this.$prompt, { y: 8, duration: 0.16 });
       }
 
       for (const n of this.npcs) {

@@ -1,6 +1,42 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { makeGooglyEyes } from './GooglyEyes.js';
+import { colgarEntorno } from '../render/Entorno.js';
+import { disposeObject } from '../core/Disposal.js';
+
+/**
+ * Acabado PBR del equipaje, por tipo. Una carcasa de policarbonato y unas
+ * bolsas de rafia atadas con pita no devuelven la misma luz, y hasta ahora
+ * compartían un único material a `roughness: 0.55` — el peor punto medio
+ * posible: demasiado mate para que la maleta dura brille y demasiado pulido
+ * para que la lona se lea como lona.
+ *
+ * **`metalness` se queda en 0 SIEMPRE.** Subirla es el atajo fácil para tener
+ * reflejo y es justo lo que convierte una maleta en un espejo cromado: el
+ * brillo de un dieléctrico sale de bajar la rugosidad, no de fingir que la
+ * maleta es de metal.
+ *
+ * `realce` son las veces que el equipaje refleja por encima del ambiente del
+ * nivel; `realce: 0` significa "sin reflejo propio, el ambiente y punto".
+ * La razón de expresarlo así (y no como un `envMapIntensity` a pelo) está
+ * explicada en `render/Entorno.js`: sin `envMap` propio, ese número no hace
+ * absolutamente nada.
+ */
+const ACABADO_EQUIPAJE = {
+  // Policarbonato/ABS moldeado: la superficie más pulida que pisa el puesto.
+  // Es la única que se gana un reflejo nítido de los fluorescentes.
+  maletas_rigidas: { roughness: 0.26, realce: 1.35 },
+  // Cuero curtido de maletín de oficina: reflejo ancho y sucio, nunca espejo.
+  maletin: { roughness: 0.46, realce: 1.35 },
+  // Nylon balístico: teje, no refleja. Apenas un lustre en las costuras.
+  mochila: { roughness: 0.74, realce: 1.1 },
+  // Rafia y plástico fino, arrugados: mate. Y conviene que lo sean — es el
+  // equipaje más claro del set (0xcfcabb) y el único candidato real a cruzar
+  // el umbral de bloom si se le da brillo.
+  bolsas: { roughness: 0.88, realce: 0 },
+  // Cartón: el material más muerto del mostrador.
+  caja: { roughness: 0.95, realce: 0 },
+};
 
 /**
  * PassengerActor — el pasajero frente al puesto no es un sprite: es un cuerpo
@@ -13,12 +49,18 @@ import { makeGooglyEyes } from './GooglyEyes.js';
 export class PassengerActor {
   constructor(scene, perfil) {
     this.perfil = perfil;
+    this.scene = scene; // el equipaje necesita el entorno PBR de la terminal
     this.group = new THREE.Group();
     scene.add(this.group);
 
     this.stress = perfil.lineaBase ?? 25; // el NaN aquí vuelve invisible al actor: jamás sin fallback
     this.tiembla = false;
     this.mirandoSalida = false;
+    // Lo que vive FUERA del grupo del pasajero y por tanto no lo alcanza el
+    // barrido de `dispose`: las lágrimas (hijas de la escena, tienen que caer al
+    // suelo aunque el actor ya no esté) y los temporizadores que las siembran.
+    this._gotas = new Set();
+    this._olas = [];
 
     this.#buildBody(perfil);
     this.#buildLuggage(perfil);
@@ -132,6 +174,7 @@ export class PassengerActor {
         }),
       );
       drop.position.set((Math.random() - 0.5) * 0.18, 0.1 + Math.random() * 0.04, 0.15);
+      drop.visible = false; // ver la nota sobre `renderTransmissionPass` en `update`
       this.head.add(drop);
       this.sweat.push(drop);
     }
@@ -206,8 +249,17 @@ export class PassengerActor {
   }
 
   #buildLuggage(perfil) {
-    // El equipaje del caso, a los pies del pasajero.
-    const mat = new THREE.MeshStandardMaterial({ color: perfil.colorEquipaje, roughness: 0.55 });
+    // El equipaje del caso, a los pies del pasajero, con el acabado que le toca.
+    const { roughness, realce } = ACABADO_EQUIPAJE[perfil.equipaje] ?? ACABADO_EQUIPAJE.caja;
+    const mat = new THREE.MeshStandardMaterial({
+      color: perfil.colorEquipaje,
+      roughness,
+      metalness: 0, // dieléctrico SIEMPRE: ver la nota de ACABADO_EQUIPAJE
+    });
+    // Solo el equipaje rígido paga el reflejo: se le cuelga el PMREM de la
+    // terminal. La lona y el cartón se quedan con el ambiente del nivel, que es
+    // exactamente lo que les corresponde.
+    colgarEntorno(mat, this.scene, realce);
     let bag;
     switch (perfil.equipaje) {
       case 'maletas_rigidas':
@@ -451,7 +503,17 @@ export class PassengerActor {
     this.#lagrimones();
   }
 
-  /** Lágrimas gigantes: chorros de gotas azules que salen disparadas de los ojos. */
+  /**
+   * Lágrimas gigantes: chorros de gotas azules que salen disparadas de los ojos.
+   *
+   * 24 gotas por captura, cada una con geometría propia (el radio es aleatorio,
+   * así que no se puede compartir) y material clonado (cada una se desvanece a
+   * su ritmo). Son hijas de la ESCENA, no del actor — tienen que sobrevivir al
+   * pasajero para caer al suelo — así que nadie las recogía al desmontarlo:
+   * salían del grafo con `scene.remove` y su VRAM se quedaba. Ahora cada gota se
+   * apunta en `_gotas` y sale por `disposeObject`, tanto si termina su arco como
+   * si el turno la corta a media caída.
+   */
   #lagrimones() {
     const scene = this.group.parent;
     if (!scene) return;
@@ -459,8 +521,15 @@ export class PassengerActor {
       color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.9, emissive: 0x1a5a8a, emissiveIntensity: 0.4,
     });
     const origen = new THREE.Vector3();
+    const soltar = (gota) => {
+      this._gotas.delete(gota);
+      disposeObject(gota);
+    };
     for (let ola = 0; ola < 4; ola++) {
-      setTimeout(() => {
+      // El temporizador se guarda: si el pasajero se va antes de la cuarta ola,
+      // `dispose` la cancela en vez de dejarla sembrar gotas sobre una escena
+      // que ya cambió de pasajero.
+      this._olas.push(setTimeout(() => {
         if (!this.group.parent) return;
         this.head.getWorldPosition(origen);
         for (let i = 0; i < 6; i++) {
@@ -468,6 +537,7 @@ export class PassengerActor {
           gota.scale.y = 1.4; // forma de lagrimón
           gota.position.set(origen.x + (Math.random() - 0.5) * 0.1, origen.y, origen.z);
           scene.add(gota);
+          this._gotas.add(gota);
           const lado = i % 2 ? 1 : -1;
           const dx = lado * (0.25 + Math.random() * 0.45);
           const dz = (Math.random() - 0.5) * 0.5;
@@ -478,11 +548,13 @@ export class PassengerActor {
           gsap.to(gota.scale, { x: 1.6, y: 0.3, z: 1.6, duration: 0.12, delay: 0.78 }); // splash
           gsap.to(gota.material, {
             opacity: 0, duration: 0.25, delay: 0.85,
-            onComplete: () => scene.remove(gota),
+            onComplete: () => soltar(gota),
           });
         }
-      }, ola * 700);
+      }, ola * 700));
     }
+    // `mat` es solo el molde del que salen los clones: nunca se renderiza, así
+    // que no tiene programa ni textura en GPU y no hay nada que liberar en él.
   }
 
   /** Sale del puesto (hacia la salida o escoltado, según el sello). */
@@ -494,10 +566,51 @@ export class PassengerActor {
     gsap.to(this.group.rotation, { y: dir * Math.PI / 2.2, duration: 0.8, delay: 0.3 });
   }
 
+  /**
+   * Cierra al pasajero y le libera la VRAM (ADR-009).
+   *
+   * Era la fuga más grande del nivel 1 y la más fácil de pasar por alto, porque
+   * el código *parecía* limpio: `scene.remove(this.group)` saca al pasajero de
+   * la pantalla, y como desaparece de la pantalla uno da por hecho que
+   * desapareció de la tarjeta gráfica. No: `remove` solo lo descuelga del grafo.
+   * Cada pasajero deja detrás ~22 geometrías (cuerpo, cráneo, casquete de cara,
+   * pelo, dos brazos con sus manos, piernas, cinco gotas de sudor, el equipaje,
+   * los cuatro hotspots y los ojos googly) y DOS CanvasTexture de 256² — el
+   * rostro dinámico y, en los casos que lo piden, la camisa estampada.
+   *
+   * Un turno son media docena de pasajeros y la guardia puede encadenar turnos
+   * sin recargar: la cuenta no para de subir mientras el juego, visualmente,
+   * está igual que al empezar.
+   *
+   * Los tweens se matan ANTES de soltar nada. Un tween vivo sobre un material ya
+   * liberado sigue escribiéndole opacidad cada frame — y ese material ya no
+   * tiene programa que actualizar.
+   */
   dispose(scene) {
+    for (const t of this._olas) clearTimeout(t);
+    this._olas.length = 0;
     gsap.killTweensOf(this.group.position);
     gsap.killTweensOf(this.group.rotation);
-    scene.remove(this.group);
+    gsap.killTweensOf(this.group.scale);
+    gsap.killTweensOf(this.body.rotation);
+    gsap.killTweensOf(this.body.scale);
+    gsap.killTweensOf(this.head.rotation);
+    gsap.killTweensOf(this.head.position);
+    for (const arm of this.arms) gsap.killTweensOf(arm.rotation);
+    // Lágrimas todavía en vuelo: son hijas de la escena, no del actor, así que
+    // el barrido del grupo no las alcanza.
+    for (const gota of this._gotas) {
+      gsap.killTweensOf(gota.position);
+      gsap.killTweensOf(gota.scale);
+      gsap.killTweensOf(gota.material);
+      disposeObject(gota);
+    }
+    this._gotas.clear();
+    // `uniformes: true` no es necesario aquí (el pasajero no tiene shaders
+    // propios) pero tampoco estorba, y deja el barrido preparado si alguna vez
+    // alguno de sus materiales pasa a serlo.
+    disposeObject(this.group, true);
+    scene.remove(this.group); // por si el grupo colgaba de otro padre
   }
 
   update(dt, t) {
@@ -560,10 +673,20 @@ export class PassengerActor {
     }
 
     // Sudor progresivo a partir de 55 (shader-lite: gotas físicas que aparecen).
+    //
+    // El `visible` NO es cosmético: son `MeshPhysicalMaterial` con
+    // `transmission`, y un solo objeto transmisivo en la lista de render obliga
+    // al renderer a ejecutar `renderTransmissionPass` — una copia del framebuffer
+    // y un redibujado de la escena— en TODOS los fotogramas. Las cinco gotas
+    // nacían con `opacity: 0` pero visibles, así que el aeropuerto pagaba esa
+    // pasada entera durante toda la partida para dibujar cinco esferas
+    // transparentes que nadie veía. El filtro por `visible` ocurre antes de
+    // clasificar transmisivos, así que apagarlas la evita del todo.
     const sweatAlpha = THREE.MathUtils.clamp((s - 55) / 30, 0, 1);
     this.sweat.forEach((drop, i) => {
       const target = sweatAlpha > i / this.sweat.length ? 0.85 : 0;
       drop.material.opacity += (target - drop.material.opacity) * dt * 2;
+      drop.visible = drop.material.opacity > 0.01;
       if (drop.material.opacity > 0.1) drop.position.y -= dt * 0.004; // la gota resbala
       if (drop.position.y < 0.02) drop.position.y = 0.08 + Math.random() * 0.03;
     });

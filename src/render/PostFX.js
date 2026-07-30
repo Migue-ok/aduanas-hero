@@ -98,12 +98,23 @@ export class PostFX {
       this.bloom = new UnrealBloomPass(
         new THREE.Vector2(window.innerWidth, window.innerHeight),
         bloom,   // fuerza
-        0.55,    // radio
+        0.68,    // radio: halos más anchos y suaves, menos "aureola de sticker"
         // Umbral ALTO a propósito: con 0.72 el suelo de cerámica blanca de la
         // galería entraba entero en el bloom y lavaba la escena. Solo deben
         // irradiar los emisivos de verdad: neón, alarmas y oro.
-        0.96,
+        0.95,
       );
+      // RODILLA SUAVE — la clave para el look Blade Runner sin quemar el suelo.
+      // `UnrealBloomPass` filtra por LUMINANCIA con un `smoothstep(umbral,
+      // umbral + smoothWidth, luma)`, y su `smoothWidth` por defecto es 0.01:
+      // un corte prácticamente binario. Un píxel a 0.949 no brillaba nada y uno
+      // a 0.951 brillaba entero — de ahí ese borde duro y sucio alrededor de las
+      // luces. Con 0.35 la entrada es progresiva:
+      //   · suelo de cerámica iluminado (luma ≈ 1.0) → ~5 % de aporte
+      //   · neón/alarma/oro emisivos    (luma 2–5)   → aporte total
+      // El resultado es exactamente el pedido: los neones irradian y los suelos
+      // claros se quedan donde estaban.
+      this.bloom.highPassUniforms.smoothWidth.value = 0.35;
       this.composer.addPass(this.bloom);
     }
 
@@ -115,15 +126,88 @@ export class PostFX {
   get detective() { return this.grade.uniforms.uMix.value; }
 
   setSize(w, h) {
+    // `composer.setSize` ya reenvía el tamaño EFECTIVO (× pixelRatio) a cada
+    // pasada, bloom incluido. El `this.bloom.setSize(w, h)` que había aquí lo
+    // volvía a dimensionar con el tamaño LÓGICO, así que el halo acababa
+    // trabajando a otra resolución que el resto de la cadena — más blando y
+    // escalonado — después de cada resize.
     this.composer.setSize(w, h);
-    this.bloom?.setSize(w, h);
+  }
+
+  /**
+   * Cambia el ratio de píxeles de TODA la cadena. Imprescindible: el composer
+   * cachea el ratio del renderer en su constructor y `setSize` multiplica por
+   * ese valor viejo, así que sin esto un `renderer.setPixelRatio(1)` no encoge
+   * ni uno de los render targets (ver `core/PerfGuard.js`).
+   */
+  setPixelRatio(ratio) {
+    this.composer.setPixelRatio?.(ratio);
   }
 
   render() { this.composer.render(); }
 
+  /**
+   * Cierra la cadena al desmontar el nivel.
+   *
+   * ── La mina del `FullScreenQuad` ──────────────────────────────────────────
+   * Casi todas las pasadas de three dibujan sobre un `FullScreenQuad`, y TODOS
+   * los `FullScreenQuad` de la aplicación comparten UNA misma geometría: un
+   * triángulo a pantalla completa creado a nivel de módulo
+   * (`postprocessing/Pass.js:123`, `const _geometry = new
+   * FullscreenTriangleGeometry()`). Pero su `dispose()` hace
+   * `this._mesh.geometry.dispose()` (Pass.js:157) — es decir, la primera pasada
+   * que se cierre destruye el triángulo de TODA la aplicación, no el suyo.
+   *
+   * Hoy no explota solo porque salir de un nivel recarga la página. En cuanto
+   * el `SceneManager` encadene dos niveles sin recargar, el composer del
+   * segundo nacería sobre una geometría ya liberada: sus buffers de GPU
+   * borrados y su entrada fuera del registro del renderer. Es exactamente la
+   * "pérdida de contexto abrupta en medio de una transición" — y encima
+   * descuadra `renderer.info.memory.geometries` hacia abajo, que es lo que hace
+   * imposible fiarse de la medición de fugas.
+   *
+   * El triángulo son 3 vértices: no hay nada que ganar liberándolo y todo que
+   * perder. Se le blinda el `dispose` durante el barrido y se le devuelve
+   * después. Lo caro de verdad —render targets, materiales, texturas— sí se
+   * suelta, que es de lo que va este método.
+   */
   dispose() {
-    for (const pass of this.composer.passes) pass.dispose?.();
+    // Se blindan TODAS las geometrías de quad de la cadena (en la práctica es
+    // siempre la misma, la compartida) y se restauran al terminar.
+    const blindadas = new Map();
+    for (const geo of this.#geometriasDeQuads()) {
+      blindadas.set(geo, geo.dispose);
+      geo.dispose = () => {};
+    }
+    try {
+      for (const pass of this.composer.passes) pass.dispose?.();
+    } finally {
+      for (const [geo, original] of blindadas) geo.dispose = original;
+    }
     this.composer.renderTarget1?.dispose();
     this.composer.renderTarget2?.dispose();
+  }
+
+  /**
+   * Las geometrías de los `FullScreenQuad` de la cadena.
+   *
+   * Se buscan por FORMA y no por nombre a propósito: la propiedad donde cada
+   * pasada guarda su quad es privada y ya ha cambiado de nombre entre versiones
+   * de three (`fsQuad` → `_fsQuad` en r185). Apuntar al nombre daba un
+   * `undefined` silencioso — el blindaje parecía estar puesto y no protegía
+   * nada, que es la peor variante posible de este bug. Recorrer las propiedades
+   * buscando «algo que envuelve una malla» sobrevive al renombre y, si un día
+   * deja de encontrar nada, lo peor que pasa es volver al comportamiento
+   * anterior.
+   */
+  #geometriasDeQuads() {
+    const geos = new Set();
+    for (const pass of this.composer.passes) {
+      for (const v of Object.values(pass)) {
+        const malla = v?._mesh ?? v?.mesh;
+        if (malla?.isMesh && malla.geometry?.isBufferGeometry) geos.add(malla.geometry);
+      }
+    }
+    return geos;
   }
 }

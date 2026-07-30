@@ -1,4 +1,11 @@
+import gsap from 'gsap';
 import { TEMAS } from '../gameplay/cases.js';
+import { audio } from '../audio/AudioEngine.js';
+// El patrón de apertura/cierre nació aquí y vive ahora en `ui/Paneles.js`, que
+// lo comparte con los HUD de los niveles 2 y 3. Toda la explicación de por qué
+// hace falta `clearProps`, respaldo por temporizador y protección contra la
+// reapertura está documentada allí.
+import { abrirPanel, cerrarPanel, cascada } from './Paneles.js';
 
 /**
  * HUD — la capa diegética: papelería, monitores, sellos.
@@ -52,15 +59,16 @@ export class HUD {
   // ── Briefing / Hoja de servicio ─────────────────────────────────────
   showBriefing(turno, briefing, onStart) {
     const hoja = this.$('hoja');
-    hoja.classList.remove('oculto');
     hoja.innerHTML = `
       <h2>ORDEN DE SERVICIO · TURNO ${String(turno).padStart(3, '0')}</h2>
       <p class="brief-body">${briefing}</p>
       <p class="brief-body" style="margin-top:12px">Cuatro pasajeros en cola. La fila no espera.</p>
       <button class="firma">ATENDER AL PRIMER PASAJERO</button>
     `;
+    abrirPanel(hoja, { y: 26, scale: 0.9, duration: 0.55 });
     hoja.querySelector('button').onclick = () => {
-      hoja.classList.add('oculto');
+      audio.clic('firme');
+      cerrarPanel(hoja, { sfx: true });
       onStart();
     };
   }
@@ -74,7 +82,6 @@ export class HUD {
           ? `<div class="perdida">La señal estaba ahí: «${r.señalesPerdidas[0]}»</div>` : ''}
       </div>`).join('');
     const hoja = this.$('hoja');
-    hoja.classList.remove('oculto');
     hoja.innerHTML = `
       <h2>HOJA DE SERVICIO</h2>
       ${filas}
@@ -84,8 +91,10 @@ export class HUD {
       <div class="fila-resultado"><b>Reputación:</b> ${franja}</div>
       <button class="firma">FIRMAR Y CONTINUAR</button>
     `;
+    abrirPanel(hoja, { y: 26, scale: 0.9, duration: 0.55 });
     hoja.querySelector('button').onclick = () => {
-      hoja.classList.add('oculto');
+      audio.clic('firme');
+      cerrarPanel(hoja, { sfx: true });
       onSign();
     };
   }
@@ -93,16 +102,17 @@ export class HUD {
   // ── Ficha del pasajero ──────────────────────────────────────────────
   showFicha(caso) {
     const f = this.$('ficha');
-    f.classList.remove('oculto');
     f.innerHTML = `
       <h3>LLEGADA · ${caso.id}</h3>
       <div class="nombre">${caso.perfil.nombre}, ${caso.perfil.edad}</div>
       <div class="meta">${caso.perfil.origen}</div>
       <div class="obs">${caso.perfil.presentacion}</div>
     `;
+    // Entra desde la izquierda, como una ficha que deslizan sobre el mostrador.
+    abrirPanel(f, { y: 0, scale: 0.94, duration: 0.5, sfx: false });
   }
 
-  hideFicha() { this.$('ficha').classList.add('oculto'); }
+  hideFicha() { cerrarPanel(this.$('ficha')); }
 
   // ── Diálogo con máquina de escribir ─────────────────────────────────
   dialog(hablante, texto, cps = 45) {
@@ -127,19 +137,22 @@ export class HUD {
   // ── Dock de herramientas ────────────────────────────────────────────
   showDock(botones) {
     const dock = this.$('dock');
-    dock.classList.remove('oculto');
     dock.innerHTML = '';
     for (const b of botones) {
       const el = document.createElement('button');
       el.textContent = b.label;
       if (b.cls) el.className = b.cls;
+      // `id` estable e independiente del rótulo: Justus lo usa para SEÑALAR el
+      // botón del que está hablando (`[data-tool="xray"]`) sin depender del texto.
+      if (b.id) el.dataset.tool = b.id;
       el.disabled = !!b.disabled;
-      el.onclick = b.onClick;
+      el.onclick = (ev) => { audio.clic(b.cls === 'primary' ? 'firme' : 'suave'); b.onClick(ev); };
       dock.appendChild(el);
     }
+    abrirPanel(dock, { y: 22, scale: 1, duration: 0.4, sfx: false });
   }
 
-  hideDock() { this.$('dock').classList.add('oculto'); }
+  hideDock() { cerrarPanel(this.$('dock'), { y: 18 }); }
 
   // ── Interrogatorio: la LIBRETA del oficial ──────────────────────────
   // Nada de cajones grises: una libreta de papel con preguntas anotadas a mano
@@ -147,7 +160,6 @@ export class HUD {
   // puede TOCAR — sus ojos, manos y garganta son botones.
   showInterrogation({ agotado, quebrado, evidencias }, on) {
     const p = this.$('interrogatorio');
-    p.classList.remove('oculto');
     const off = agotado || quebrado ? 'disabled' : '';
     const temas = TEMAS.map((t) =>
       `<button class="tema" data-tema="${t.id}" ${off}>· ¿${t.label}?</button>`).join('');
@@ -167,12 +179,17 @@ export class HUD {
       <div id="tell-slot"></div>
       <button class="volver" data-t="cerrar">◂ VOLVER AL PUESTO</button>
     `;
-    p.querySelectorAll('button.tema').forEach((b) => { b.onclick = () => on.preguntar(b.dataset.tema); });
-    p.querySelectorAll('button.tactica').forEach((b) => { b.onclick = () => on[b.dataset.t](); });
-    p.querySelector('[data-t="cerrar"]').onclick = on.cerrar;
+    abrirPanel(p, { y: 20, scale: 0.96, duration: 0.46 });
+    p.querySelectorAll('button.tema').forEach((b) => {
+      b.onclick = () => { audio.clic(); on.preguntar(b.dataset.tema); };
+    });
+    p.querySelectorAll('button.tactica').forEach((b) => {
+      b.onclick = () => { audio.clic('firme'); on[b.dataset.t](); };
+    });
+    p.querySelector('[data-t="cerrar"]').onclick = () => { audio.clic(); on.cerrar(); };
   }
 
-  hideInterrogation() { this.$('interrogatorio').classList.add('oculto'); }
+  hideInterrogation() { cerrarPanel(this.$('interrogatorio')); }
 
   /** Chip de tell registrable: aparece cuando el cuerpo "habló" y el jugador puede anotarlo. */
   showTellChip(texto, onClick) {
@@ -181,20 +198,24 @@ export class HUD {
     const chip = document.createElement('span');
     chip.className = 'chip-tell';
     chip.textContent = `✎ ANOTAR EN EXPEDIENTE: ${texto}`;
-    chip.onclick = () => { chip.remove(); onClick(); };
+    chip.onclick = () => { audio.clic('firme'); chip.remove(); onClick(); };
     slot.appendChild(chip);
+    gsap.from(chip, { opacity: 0, scale: 0.7, duration: 0.42, ease: 'back.out(2.4)',
+      onComplete: () => gsap.set(chip, { clearProps: 'transform,opacity' }) });
   }
 
   // ── Documentos ──────────────────────────────────────────────────────
   showDocuments(caso, onSeñal) {
     const p = this.$('documentos');
-    p.classList.remove('oculto');
     p.innerHTML = caso.documentos.map((doc) => `
       <div class="doc" data-doc="${doc.id}">
         <h4>${doc.titulo}</h4>
         ${doc.lineas.map((l, i) =>
           `<div class="linea ${l.señal ? 'señalable' : ''}" data-i="${i}">${l.texto}</div>`).join('')}
       </div>`).join('');
+    abrirPanel(p, { y: 24, scale: 0.94, duration: 0.5 });
+    // Las fichas caen escalonadas, como papeles que alguien deja de uno en uno.
+    cascada(p.querySelectorAll('.doc'), { y: 26, duration: 0.42, stagger: 0.09 });
     p.querySelectorAll('.doc').forEach((docEl) => {
       const doc = caso.documentos.find((d) => d.id === docEl.dataset.doc);
       docEl.querySelectorAll('.linea.señalable').forEach((lin) => {
@@ -207,39 +228,47 @@ export class HUD {
     });
   }
 
-  hideDocuments() { this.$('documentos').classList.add('oculto'); }
+  hideDocuments() { cerrarPanel(this.$('documentos')); }
 
   // ── Rayos X ─────────────────────────────────────────────────────────
   showXray(on) {
     const c = this.$('xray-controls');
-    c.classList.remove('oculto');
     c.innerHTML = `
       <button data-m="0">CONTRASTE NORMAL</button>
       <button data-m="1">REALZAR ORGÁNICO</button>
       <button data-m="2">REALZAR INORGÁNICO</button>
       <button data-m="salir" class="primary">APAGAR ESCÁNER</button>
     `;
+    abrirPanel(c, { y: 20, scale: 0.96, duration: 0.42 });
     c.querySelectorAll('button').forEach((b) => {
-      b.onclick = () => (b.dataset.m === 'salir' ? on.salir() : on.contraste(Number(b.dataset.m)));
+      b.onclick = () => {
+        audio.clic(b.dataset.m === 'salir' ? 'firme' : 'suave');
+        return b.dataset.m === 'salir' ? on.salir() : on.contraste(Number(b.dataset.m));
+      };
     });
     this.xrayLabel('Arrastra la maleta · rueda = zoom · toca una silueta para marcarla');
   }
 
   xrayLabel(texto) {
     const l = this.$('xray-label');
+    const nuevo = l.classList.contains('oculto');
     l.classList.remove('oculto');
     l.textContent = texto;
+    // El rótulo cambia mucho durante el escaneo: solo late al aparecer o al
+    // cambiar de texto, nunca un rebote completo que distraiga de la silueta.
+    gsap.fromTo(l, { opacity: nuevo ? 0 : 0.35, scale: nuevo ? 0.94 : 1 },
+      { opacity: 1, scale: 1, duration: nuevo ? 0.4 : 0.22, ease: 'back.out(1.6)', overwrite: 'auto',
+        onComplete: () => gsap.set(l, { clearProps: 'transform,opacity' }) });
   }
 
   hideXray() {
-    this.$('xray-controls').classList.add('oculto');
-    this.$('xray-label').classList.add('oculto');
+    cerrarPanel(this.$('xray-controls'));
+    cerrarPanel(this.$('xray-label'), { duration: 0.16 });
   }
 
   // ── Escáner corporal (siluetas, Visión §28.2) ───────────────────────
   showCorporal(onMark, onClose) {
     const p = this.$('corporal');
-    p.classList.remove('oculto');
     p.innerHTML = `
       <h3>ESCÁNER CORPORAL · PROTOCOLO</h3>
       <svg viewBox="0 0 100 220">
@@ -250,17 +279,18 @@ export class HUD {
       <p style="font-size:11px;color:#8a95a3;letter-spacing:1px">Representación por siluetas. Toca la anomalía.</p>
       <button style="margin-top:10px">CERRAR</button>
     `;
+    abrirPanel(p, { y: 18, scale: 0.9, duration: 0.5 });
     p.querySelector('.zona-anomala').addEventListener('click', () => {
       p.querySelector('.zona-anomala').style.fill = 'rgba(194,43,43,0.8)';
+      audio.clic('firme');
       onMark();
     }, { once: true });
-    p.querySelector('button').onclick = () => { p.classList.add('oculto'); onClose(); };
+    p.querySelector('button').onclick = () => { audio.clic(); cerrarPanel(p, { sfx: true }); onClose(); };
   }
 
   // ── Decisión ────────────────────────────────────────────────────────
   showDecision(expedienteCount, onDecide) {
     const p = this.$('decision');
-    p.classList.remove('oculto');
     p.innerHTML = `
       <div class="sellos">
         ${['PASE', 'COBRO', 'RETENIDO', 'DERIVADO'].map((s) => `<button class="${s}">${s}</button>`).join('')}
@@ -271,12 +301,15 @@ export class HUD {
           ? 'Expediente vacío: será una corazonada.'
           : `${expedienteCount} señal(es) en el expediente.`} El sello es irreversible.</div>
     `;
+    abrirPanel(p, { y: 22, scale: 0.93, duration: 0.5 });
+    // Los cuatro sellos entran en abanico: el gesto irreversible se presenta.
+    cascada(p.querySelectorAll('.sellos button'), { y: 18, duration: 0.34, stagger: 0.06 });
     p.querySelectorAll('.sellos button').forEach((b) => {
-      b.onclick = () => { p.classList.add('oculto'); onDecide(b.textContent); };
+      b.onclick = () => { audio.clic('firme'); cerrarPanel(p, { duration: 0.16 }); onDecide(b.textContent); };
     });
   }
 
-  hideDecision() { this.$('decision').classList.add('oculto'); }
+  hideDecision() { cerrarPanel(this.$('decision')); }
 
   // ── Expediente ──────────────────────────────────────────────────────
   addSeñal(texto) {
@@ -286,6 +319,10 @@ export class HUD {
     el.className = 'señal';
     el.textContent = texto;
     lista.appendChild(el);
+    // Una prueba entrando al expediente merece que el panel entero acuse el golpe.
+    gsap.fromTo(this.$('expediente'), { scale: 1.035 },
+      { scale: 1, duration: 0.42, ease: 'elastic.out(1, 0.5)', overwrite: 'auto',
+        onComplete: () => gsap.set(this.$('expediente'), { clearProps: 'transform' }) });
   }
 
   clearSeñales() {
@@ -300,6 +337,7 @@ export class HUD {
     const btn = c.querySelector('.continuar');
     btn.classList.remove('oculto');
     btn.onclick = () => {
+      audio.clic('firme');
       c.classList.remove('activa');
       btn.classList.add('oculto');
       onContinue();
@@ -312,6 +350,9 @@ export class HUD {
     t.textContent = texto;
     t.classList.toggle('alerta', alerta);
     t.classList.add('visible');
+    gsap.fromTo(t, { y: -14, scale: 0.94 },
+      { y: 0, scale: 1, duration: 0.44, ease: 'back.out(1.8)', overwrite: 'auto',
+        onComplete: () => gsap.set(t, { clearProps: 'transform' }) });
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => t.classList.remove('visible'), dur);
   }
@@ -322,6 +363,6 @@ export class HUD {
     this.hideDocuments();
     this.hideXray();
     this.hideDecision();
-    this.$('corporal').classList.add('oculto');
+    cerrarPanel(this.$('corporal'));
   }
 }

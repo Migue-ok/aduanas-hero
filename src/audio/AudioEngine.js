@@ -295,6 +295,114 @@ export class AudioEngine {
     setTimeout(() => this.#burst({ dur: 0.2, type: 'lowpass', freq: 500, gain: 0.06 }), 90);
   }
 
+  /**
+   * Clic de interfaz. El juego tenía sonido para el sello, el papel y el perro,
+   * pero pulsar un botón del HUD era MUDO: la mitad de la sensación de solidez
+   * de una UI está en que el dedo reciba respuesta.
+   *
+   * Es deliberadamente pequeño — un tick de relé, no un "blip" de videojuego:
+   * un transitorio corto de ruido pasa-banda con un cuerpo de onda triangular
+   * grave debajo. Suena a botón físico de mostrador.
+   * @param {'suave'|'firme'} peso  'firme' para acciones con consecuencia.
+   */
+  clic(peso = 'suave') {
+    if (!this.started) return;
+    const firme = peso === 'firme';
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(firme ? 320 : 460, t);
+    o.frequency.exponentialRampToValueAtTime(firme ? 140 : 240, t + 0.045);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(firme ? 0.07 : 0.035, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + (firme ? 0.09 : 0.055));
+    o.connect(g).connect(this.dramaGain);
+    o.start(t);
+    o.stop(t + 0.12);
+    this.#burst({ dur: 0.022, freq: firme ? 3200 : 4200, q: 0.7, gain: firme ? 0.09 : 0.05, drama: true });
+  }
+
+  /**
+   * Paso del oficial. Caminar por el muelle era MUDO: seis mil metros cuadrados
+   * de hormigón sin un solo sonido bajo los pies, que es lo que más delata que
+   * un espacio en primera persona no está terminado.
+   *
+   * Dos capas, como un paso real: el CUERPO (un seno grave que cae rápido — la
+   * suela contra la losa) y la TEXTURA (un transitorio de ruido, la arenilla).
+   * Dentro de un contenedor la chapa resuena: el transitorio sube de frecuencia
+   * y se le añade una cola metálica corta. Cada paso lleva variación aleatoria
+   * de tono y volumen; sin ella, cinco pasos seguidos suenan a metrónomo.
+   * @param {boolean} metal  true si el jugador va dentro de un contenedor.
+   */
+  paso(metal = false) {
+    if (!this.started) return;
+    const t = this.ctx.currentTime;
+    const jitter = 0.88 + Math.random() * 0.24;
+
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime((metal ? 132 : 96) * jitter, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.075);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.085 * jitter, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+    o.connect(g).connect(this.worldFilter);
+    o.start(t);
+    o.stop(t + 0.14);
+
+    this.#burst({
+      dur: metal ? 0.05 : 0.035,
+      type: 'highpass',
+      freq: (metal ? 2600 : 1700) * jitter,
+      gain: metal ? 0.055 : 0.038,
+    });
+    // La chapa del contenedor devuelve el golpe un instante después.
+    if (metal) setTimeout(() => this.#burst({ dur: 0.18, type: 'bandpass', freq: 900, q: 6, gain: 0.028 }), 45);
+  }
+
+  /**
+   * Chispa eléctrica del tubo de rayos X. Acompaña al arco que dibuja el shader
+   * del monitor: sin sonido, un destello en pantalla se lee como un fallo de
+   * renderizado; con él, se lee como una máquina vieja que pide corriente.
+   *
+   * Un arco real es ruido de banda ancha con un pico agudo y cola cortísima,
+   * más un zumbido de red de 60 Hz que se cuela un instante (Perú va a 60).
+   */
+  chispa(fuerza = 1) {
+    if (!this.started) return;
+    const f = Math.max(0.2, Math.min(1, fuerza));
+    // Crepitación: tres transitorios muy cortos y desiguales.
+    for (const [ms, freq, g] of [[0, 5200, 0.10], [26, 3400, 0.06], [58, 6800, 0.035]]) {
+      setTimeout(() => this.#burst({
+        dur: 0.02 + Math.random() * 0.02,
+        type: 'highpass',
+        freq: freq * (0.85 + Math.random() * 0.3),
+        q: 0.8,
+        gain: g * f,
+        drama: true,
+      }), ms);
+    }
+    // Zumbido de red: el instante en que la fuente se resiente.
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = 60;
+    const bq = this.ctx.createBiquadFilter();
+    bq.type = 'lowpass'; bq.frequency.value = 320;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.05 * f, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    o.connect(bq).connect(g).connect(this.dramaGain);
+    o.start(t);
+    o.stop(t + 0.2);
+  }
+
+  /** Roce al abrir/cerrar un panel: aire, no un "swoosh" de presentación. */
+  panel(abre = true) {
+    if (!this.started) return;
+    this.#burst({ dur: abre ? 0.13 : 0.09, type: 'bandpass', freq: abre ? 1500 : 900, q: 0.8, gain: 0.045 });
+  }
+
   beep(ok = true) {
     if (!this.started) return;
     const t = this.ctx.currentTime;

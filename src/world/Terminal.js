@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { colgarEntorno } from '../render/Entorno.js';
+import { quality } from '../core/Device.js';
 
 /**
  * Terminal — el aeropuerto como organismo.
@@ -18,9 +20,24 @@ export class Terminal {
     RectAreaLightUniformsLib.init();
 
     // Entorno HDR procedural: da reflejos PBR a metales y suelo.
+    //
+    // Los tres `dispose()` de abajo no son ceremonia: el generador se queda con
+    // 12 geometrías de plano y su render target de ping-pong, y la sala con su
+    // caja y sus materiales. Como aquí se hornea UNA vez y el resultado ya está
+    // en `scene.environment`, todo eso es basura desde el instante siguiente.
+    //
+    // El render target sí se guarda: es lo único que puede liberar el PMREM más
+    // tarde. Soltar `scene.environment` (que es su `.texture`) no hace nada —
+    // el listener de three vive en el target, no en la textura. `disposeScene`
+    // busca ese `__pmremTarget` a propósito.
     const pmrem = new THREE.PMREMGenerator(gl);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const sala = new RoomEnvironment();
+    const target = pmrem.fromScene(sala, 0.04);
+    scene.environment = target.texture;
+    scene.__pmremTarget = target;
     scene.environmentIntensity = 0.35;
+    pmrem.dispose();
+    sala.dispose();
 
     // Atmósfera cartoon (ADR-004): menos niebla, fondo más vivo.
     scene.fog = new THREE.FogExp2(0x141b28, 0.016);
@@ -49,9 +66,11 @@ export class Terminal {
         color: 0x9aa3ad,
         roughness: 0.12,
         metalness: 0.25,
-        envMapIntensity: 1.2,
       }),
     );
+    // El suelo pulido es lo que vende el aeropuerto: reflejo propio, no el
+    // ambiente plano del nivel (su `envMapIntensity: 1.2` tampoco se aplicaba).
+    colgarEntorno(floor.material, this.scene, 1.35);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     this.group.add(floor);
@@ -123,7 +142,12 @@ export class Terminal {
     this.keyLight.position.set(0.6, 3.9, 0.4);
     this.keyLight.target.position.set(0, 1.2, -1.5);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(1024, 1024);
+    // Presupuesto por dispositivo, no una constante a pelo (ADR-008): es la
+    // ÚNICA sombra dinámica del nivel y la que enfoca al pasajero durante todo
+    // el turno, así que un 1024² fijo obligaba al teléfono a renderizar 16×
+    // más téxeles de sombra que los que el resto del juego le concede
+    // (`quality.spotShadowMap` = 256 en móvil, 1024 en escritorio).
+    this.keyLight.shadow.mapSize.set(quality.spotShadowMap, quality.spotShadowMap);
     this.group.add(this.keyLight, this.keyLight.target);
 
     // Relleno general: más cálido y generoso que en la era "thriller" (ADR-004).
@@ -140,10 +164,13 @@ export class Terminal {
     const brushed = new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.35, metalness: 0.85 });
     const darkLam = new THREE.MeshStandardMaterial({ color: 0x2a2e35, roughness: 0.5, metalness: 0.2 });
 
-    // Tablero del mostrador: laminado oscuro con leve reflejo (aquí viven documentos y sellos).
-    const top = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.07, 1.15), new THREE.MeshStandardMaterial({
-      color: 0x30353d, roughness: 0.22, metalness: 0.35, envMapIntensity: 1.1,
-    }));
+    // Tablero del mostrador: laminado oscuro con reflejo (aquí viven documentos
+    // y sellos, y es la superficie que el jugador mira durante todo el turno).
+    // Su `envMapIntensity: 1.1` llevaba tiempo sin aplicarse — ver `Entorno.js`.
+    const top = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.07, 1.15), colgarEntorno(
+      new THREE.MeshStandardMaterial({ color: 0x30353d, roughness: 0.22, metalness: 0.35 }),
+      this.scene, 1.35,
+    ));
     top.position.set(0, 1.02, 0.35);
     top.castShadow = top.receiveShadow = true;
     this.group.add(top);

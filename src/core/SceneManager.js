@@ -82,6 +82,31 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Cierra el nivel en curso antes de dejar la página.
+   *
+   * Hasta ahora `unmount()` estaba escrito en los dos niveles y **no lo llamaba
+   * nadie**: `onExit` iba directo a `window.location.reload()`, así que toda la
+   * cadena de liberación (`cerrarNivel`, `disposeScene`, `clearRigCache`,
+   * `PostFX.dispose`) era código muerto. Y con ella se iba lo único que permite
+   * saber si una fuga existe: la traza de VRAM que imprime `cerrarNivel` nunca
+   * llegaba a la consola, de modo que cualquier cifra de «residuo» salía de una
+   * llamada manual y no de una partida real.
+   *
+   * La recarga se mantiene (es la decisión de arquitectura vigente: volver al
+   * menú = reset limpio), pero ahora se desmonta primero. El `try` no es
+   * decoración: si el cierre reventara, el jugador se quedaría atrapado en un
+   * nivel del que ya pulsó salir, y eso es mucho peor que una fuga.
+   */
+  cerrarActual() {
+    try {
+      this.current?.unmount?.();
+    } catch (e) {
+      console.warn('[AduanasHero] El nivel falló al cerrarse; se recarga igual.', e);
+    }
+    this.current = null;
+  }
+
   async #select(levelId) {
     this.menu.classList.add('hidden');
     this.#pedirLandscape(true); // todos los niveles se juegan en horizontal
@@ -94,7 +119,10 @@ export class SceneManager {
       if (this.hudRoot) this.hudRoot.innerHTML = '';
       const mod = await import('../scenes/ChimbotePortScene.js');
       this.current = new mod.ChimbotePortScene({
-        onExit: () => window.location.reload(), // volver al menú = reset limpio (fase 1)
+        // Volver al menú = reset limpio (fase 1). Pero se desmonta ANTES de
+        // recargar: es lo que ejercita la ruta de liberación y lo que deja la
+        // medición de VRAM en la consola (ver `cerrarActual`).
+        onExit: () => { this.cerrarActual(); window.location.reload(); },
       });
       this.current.mount();
     } else if (levelId === 'trafasport') {
@@ -102,7 +130,7 @@ export class SceneManager {
       if (this.hudRoot) this.hudRoot.innerHTML = '';
       const mod = await import('../scenes/TrafasportRaidScene.js');
       this.current = new mod.TrafasportRaidScene({
-        onExit: () => window.location.reload(),
+        onExit: () => { this.cerrarActual(); window.location.reload(); },
       });
       this.current.mount();
     }
