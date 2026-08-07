@@ -793,6 +793,60 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * EL ESCÁNER CANINO (Canal Rojo). El ladrido de trabajo de Justus, graduable:
+   * `calor` 0..1 es lo cerca que está del olor. Es la interfaz sonora de la
+   * mecánica — el jugador aprende a leer al perro por el OÍDO antes que por la
+   * barra de la pantalla, que es como se lee a un can detector de verdad.
+   *
+   * A poca intensidad: un solo ladrido corto y apagado, casi desgana.
+   * A intensidad alta: ráfaga rápida, aguda y sostenida — el marcaje.
+   */
+  ladrido(calor = 1) {
+    if (!this.started) return;
+    const c = Math.max(0, Math.min(1, calor));
+    const n = 1 + Math.round(c * 3);                 // 1 → 4 ladridos
+    const t0 = this.ctx.currentTime;
+    const sep = 0.26 - c * 0.11;                     // más caliente = más rápido
+    for (let k = 0; k < n; k++) {
+      const t = t0 + k * sep;
+      const o = this.ctx.createOscillator();
+      o.type = 'square';
+      const base = 300 + c * 190;                    // más caliente = más agudo
+      o.frequency.setValueAtTime(base, t);
+      o.frequency.exponentialRampToValueAtTime(base * 1.85, t + 0.045);
+      o.frequency.exponentialRampToValueAtTime(base * 0.7, t + 0.15);
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 900 + c * 1400;            // el ladrido "abre" al acercarse
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.05 + c * 0.13, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+      o.connect(f).connect(g).connect(this.dramaGain);
+      o.start(t); o.stop(t + 0.2);
+    }
+  }
+
+  /**
+   * Pitido de proximidad (tipo detector): el tono sube con el calor. Acompaña al
+   * ladrido en la barra de olfato para que la lectura funcione también sin
+   * auriculares finos… y para que en móvil se note incluso con el altavoz malo.
+   */
+  pitidoProximidad(calor = 0) {
+    if (!this.started) return;
+    const c = Math.max(0, Math.min(1, calor));
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(520 + c * 900, t);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.02 + c * 0.05, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g).connect(this.dramaGain);
+    o.start(t); o.stop(t + 0.12);
+  }
+
   /** Sonido "químico": burbujeo agudo inquietante (pegamento tóxico). */
   quimico() {
     if (!this.started) return;
@@ -842,6 +896,116 @@ export class AudioEngine {
     for (let i = 0; i < 5; i++) {
       setTimeout(() => this.#burst({ dur: 0.12, type: 'bandpass', freq: 380 + Math.random() * 220, q: 1.5, gain: 0.06, drama: true }),
         i * 110);
+    }
+  }
+
+  // ── Centro Postal (ADR-013) ───────────────────────────────────────────────
+
+  /**
+   * Ambiente de la nave de clasificación: HVAC, zumbido de fluorescentes y un
+   * murmullo de trabajo de fondo. Sin megafonía de aeropuerto ni mar — pero SÍ
+   * con el latido, porque aquí la presión la pone el cronómetro de la oleada.
+   *
+   * La cinta transportadora NO arranca aquí: la enciende la escena con
+   * `cinta(true)` cuando la primera oleada echa a andar, para que el jugador
+   * OIGA el momento en que la nave se pone en marcha.
+   */
+  startPostal() {
+    if (this.started) return;
+    this.started = true;
+    this.#initBuses();
+    this.#startHVAC();
+    this.#startFluorescents();
+    this.#startCrowd();
+    this.#startHeartbeat();
+  }
+
+  /**
+   * La cinta transportadora: rumor grave continuo con el golpeteo lento de los
+   * rodillos encima (LFO a 2.6 Hz sobre la ganancia). Es el reloj sonoro del
+   * nivel — mientras suena, hay paquetes yendo hacia el camión.
+   */
+  cinta(on) {
+    if (!this.started) return;
+    if (on && !this.cintaNodes) {
+      const capa = this.#loopNoise('lowpass', 210, 0.7, 0.0001);
+      capa.gain.gain.linearRampToValueAtTime(0.055, this.ctx.currentTime + 0.9);
+      // Rodillos: el traqueteo periódico que distingue una cinta de un ventilador.
+      const lfo = this.ctx.createOscillator();
+      lfo.frequency.value = 2.6;
+      const lfoGain = this.ctx.createGain();
+      lfoGain.gain.value = 0.018;
+      lfo.connect(lfoGain).connect(capa.gain.gain);
+      lfo.start();
+      this.cintaNodes = { capa, lfo };
+    } else if (!on && this.cintaNodes) {
+      const { capa, lfo } = this.cintaNodes;
+      const t = this.ctx.currentTime;
+      capa.gain.gain.cancelScheduledValues(t);
+      capa.gain.gain.setValueAtTime(capa.gain.gain.value, t);
+      capa.gain.gain.linearRampToValueAtTime(0.0001, t + 0.7);
+      capa.src.stop(t + 0.8);
+      lfo.stop(t + 0.8);
+      this.cintaNodes = null;
+    }
+  }
+
+  /**
+   * El pulso de escaneo: un barrido de frecuencia cortísimo (el «zap» del lector
+   * de códigos) seguido del veredicto. Tres resultados y tres timbres, porque el
+   * jugador tiene que poder distinguirlos SIN mirar el HUD:
+   *   'hallazgo' — dos notas ascendentes: algo apareció.
+   *   'nada'     — un tono seco y plano: la herramienta no era esa.
+   *   'infundado'— disonancia grave: disparaste sin señal.
+   */
+  pulsoEscaner(resultado = 'nada') {
+    if (!this.started) return;
+    const t = this.ctx.currentTime;
+    const zap = this.ctx.createOscillator();
+    zap.type = 'sawtooth';
+    zap.frequency.setValueAtTime(320, t);
+    zap.frequency.exponentialRampToValueAtTime(2400, t + 0.07);
+    const zf = this.ctx.createBiquadFilter();
+    zf.type = 'bandpass'; zf.frequency.value = 1600; zf.Q.value = 2.4;
+    const zg = this.ctx.createGain();
+    zg.gain.setValueAtTime(0.07, t);
+    zg.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    zap.connect(zf).connect(zg).connect(this.dramaGain);
+    zap.start(t); zap.stop(t + 0.11);
+
+    const notas = {
+      hallazgo: [[880, 0.10], [1320, 0.20]],
+      nada: [[430, 0.16]],
+      infundado: [[196, 0.34], [185, 0.34]],
+    }[resultado] ?? [[430, 0.16]];
+
+    notas.forEach(([hz, dur], i) => {
+      const t0 = t + 0.09 + i * 0.09;
+      const o = this.ctx.createOscillator();
+      o.type = resultado === 'infundado' ? 'sawtooth' : 'square';
+      o.frequency.setValueAtTime(hz, t0);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(resultado === 'infundado' ? 0.05 : 0.035, t0);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      o.connect(g).connect(this.dramaGain);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    });
+  }
+
+  /** Campana de arranque de oleada: la nave avisa de que empieza el flujo. */
+  campanaOleada() {
+    if (!this.started) return;
+    const t = this.ctx.currentTime;
+    for (const [hz, retardo, amp] of [[660, 0, 0.06], [990, 0.16, 0.045]]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(hz, t + retardo);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + retardo);
+      g.gain.exponentialRampToValueAtTime(amp, t + retardo + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + retardo + 0.9);
+      o.connect(g).connect(this.dramaGain);
+      o.start(t + retardo); o.stop(t + retardo + 1);
     }
   }
 

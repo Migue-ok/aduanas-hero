@@ -59,6 +59,12 @@ export class SceneManager {
             <div class="lm-card-desc">La historia de Mateo y las Zapatillas, narrada por voz: olfato K-9, allanamiento caótico, persecución y la lección final.</div>
             <div class="lm-card-mode">▸ Raid narrativo · 5 fases · 🎧 voz</div>
           </button>
+          <button class="lm-card" data-level="centropostal">
+            <div class="lm-card-tag">NIVEL 4</div>
+            <div class="lm-card-name">Centro Postal</div>
+            <div class="lm-card-desc">Encomiendas a contrarreloj. Lee el síntoma, elige la herramienta y dispara el pulso antes de que el bulto suba al camión. Luego arma el acta en la Mesa de Peritaje.</div>
+            <div class="lm-card-mode">▸ Oleadas · WASD/ratón + táctil</div>
+          </button>
         </div>
         <div class="lm-expediente g-pill"></div>
         <p class="lm-hint">Auriculares recomendados · 16+ · Tu reputación es una sola para toda la carrera</p>
@@ -76,7 +82,7 @@ export class SceneManager {
       `<b>${progreso.rango}</b> · REPUTACIÓN ${d.reputacion}/100 · TURNOS ${d.turnos}`
       + (d.incautaciones ? ` · INCAUTACIONES ${d.incautaciones}` : '')
       + (d.rescates ? ` · RESCATES ${d.rescates}` : '');
-    for (const id of ['aeropuerto', 'chimbote', 'trafasport']) {
+    for (const id of ['aeropuerto', 'chimbote', 'trafasport', 'centropostal']) {
       const card = menu.querySelector(`.lm-card[data-level="${id}"] .lm-card-tag`);
       if (card) card.textContent += hecho(id);
     }
@@ -130,6 +136,14 @@ export class SceneManager {
       if (this.hudRoot) this.hudRoot.innerHTML = '';
       const mod = await import('../scenes/TrafasportRaidScene.js');
       this.current = new mod.TrafasportRaidScene({
+        onExit: () => { this.cerrarActual(); window.location.reload(); },
+      });
+      this.current.mount();
+    } else if (levelId === 'centropostal') {
+      this.titleScreen?.classList.add('hidden');
+      if (this.hudRoot) this.hudRoot.innerHTML = '';
+      const mod = await import('../scenes/CentroPostalScene.js');
+      this.current = new mod.CentroPostalScene({
         onExit: () => { this.cerrarActual(); window.location.reload(); },
       });
       this.current.mount();

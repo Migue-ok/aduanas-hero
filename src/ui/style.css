@@ -127,9 +127,12 @@ html, body {
   border-bottom: 1px solid var(--panel-line); padding-bottom: 8px; margin-bottom: 10px;
 }
 
-/* Expediente (persistente a la derecha) */
+/* Expediente (persistente a la derecha).
+   Baja hasta 118px porque encima vive el MARCADOR (`ui/Marcador.js`), que ocupa
+   la esquina superior derecha: es el elemento que más mira el jugador y no
+   puede compartir píxel con el expediente. */
 #expediente {
-  top: 52px; right: 14px; width: 285px; max-height: 55vh; overflow-y: auto;
+  top: 118px; right: 14px; width: 285px; max-height: 48vh; overflow-y: auto;
 }
 #expediente .señal {
   padding: 8px 10px; margin-bottom: 6px; font-size: 12px; line-height: 1.45;
@@ -386,7 +389,7 @@ html, body {
   .dock button, .panel button { font-size: 11px; padding: 14px 13px; min-height: 52px; letter-spacing: 1px; }
 
   /* Paneles laterales: ya no caben a los lados — se encogen y suben */
-  #expediente { top: 46px; right: 8px; width: 44vw; max-width: 210px; max-height: 30vh; padding: 10px; }
+  #expediente { top: 96px; right: 8px; width: 44vw; max-width: 210px; max-height: 30vh; padding: 10px; }
   #expediente .señal { font-size: 10px; padding: 6px 8px; }
   #ficha { top: 46px; left: 8px; width: 44vw; max-width: 220px; padding: 10px; }
   #ficha .nombre { font-size: 15px; }
@@ -438,7 +441,8 @@ html, body {
 @media (max-height: 460px) and (pointer: coarse) {
   .dialogo { bottom: 8%; font-size: 13px; padding: 9px 12px; }
   .topbar { padding: 5px 10px; }
-  #expediente, #ficha { max-height: 40vh; top: 40px; }
+  #ficha { max-height: 40vh; top: 40px; }
+  #expediente { max-height: 32vh; top: 88px; }
   #interrogatorio { max-height: 74vh; }
 }
 

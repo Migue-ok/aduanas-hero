@@ -56,4 +56,14 @@ export const Señal = Object.freeze({
   FASE_COMPLETADA: 'raid_fase_completada',
   QTE_SUCCESS: 'raid_qte_success',
   RAID_FINALIZADO: 'raid_finalizado',
+  // Marcador y zonas nuevas del Nivel 1 (ADR-012) — también aditivas.
+  PUNTOS: 'puntos_sumados',
+  PERFILAMIENTO_RESUELTO: 'perfilamiento_resuelto',
+  CANAL_ROJO_RESUELTO: 'canal_rojo_resuelto',
+  INTRUSIVA_RESUELTA: 'intrusiva_resuelta',
+  // Nivel 4 · Centro Postal (ADR-013) — aditivas, no tocan el contrato existente.
+  OLEADA_INICIADA: 'postal_oleada_iniciada',
+  PAQUETE_ESCANEADO: 'postal_paquete_escaneado',
+  ACTA_ARMADA: 'postal_acta_armada',
+  OPERATIVO_FINALIZADO: 'postal_operativo_finalizado',
 });

@@ -82,6 +82,33 @@ export class CinematicCamera {
     }
   }
 
+  /**
+   * Estación LIBRE: una cámara calculada en tiempo de ejecución.
+   *
+   * Las estaciones fijas alcanzaban mientras todo pasaba sobre el mismo
+   * mostrador. El Canal Rojo y la sala intrusiva mueven la acción a otra parte
+   * de la terminal y necesitan encuadres que dependen de DÓNDE está la maleta
+   * que el jugador acaba de tocar — imposible tabularlos de antemano.
+   *
+   * @param {THREE.Vector3|number[]} pos   posición de cámara
+   * @param {THREE.Vector3|number[]} look  punto al que mira
+   */
+  enfocar(pos, look, { fov = 46, focus = 2.4, aperture = 0.00032, duration = 1.2, vista = 'libre' } = {}) {
+    const p = Array.isArray(pos) ? pos : [pos.x, pos.y, pos.z];
+    const l = Array.isArray(look) ? look : [look.x, look.y, look.z];
+    this.vista = vista;
+    bus.emit(Señal.VISTA_CAMBIADA, { vista });
+
+    const ease = 'power3.inOut';
+    gsap.to(this.basePos, { x: p[0], y: p[1], z: p[2], duration, ease });
+    gsap.to(this.baseLook, { x: l[0], y: l[1], z: l[2], duration, ease });
+    gsap.to(this.camera, { fov, duration, ease, onUpdate: () => this.camera.updateProjectionMatrix() });
+    if (this.renderer) {
+      gsap.to(this.renderer.bokeh.uniforms.focus, { value: focus, duration: duration * 0.8, delay: duration * 0.25, ease });
+      gsap.to(this.renderer.bokeh.uniforms.aperture, { value: aperture, duration, ease });
+    }
+  }
+
   /** La respiración se acelera con la tensión dramática (0..1). */
   setTension(tension) {
     this.breathRate = 0.22 + tension * 0.24;

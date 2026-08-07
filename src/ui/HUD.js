@@ -73,7 +73,7 @@ export class HUD {
     };
   }
 
-  showSummary({ resultados, aciertos, total, franja, noticia, abusos }, onSign) {
+  showSummary({ resultados, aciertos, total, franja, noticia, abusos, balanceHTML = '' }, onSign) {
     const filas = resultados.map((r) => `
       <div class="fila-resultado">
         <b>${r.caso.titulo}</b> — sello: ${r.decision}
@@ -84,6 +84,7 @@ export class HUD {
     const hoja = this.$('hoja');
     hoja.innerHTML = `
       <h2>HOJA DE SERVICIO</h2>
+      ${balanceHTML}
       ${filas}
       <div class="fila-resultado"><b>Balance:</b> ${aciertos}/${total} decisiones sostenibles
         ${abusos ? ` · <span class="calidad fallo">${abusos} exceso(s) sin indicios</span>` : ''}</div>
@@ -355,6 +356,16 @@ export class HUD {
         onComplete: () => gsap.set(t, { clearProps: 'transform' }) });
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => t.classList.remove('visible'), dur);
+  }
+
+  /**
+   * Modo zona: el puesto cede la pantalla a otra sala (canal rojo, DIRANDRO,
+   * perfilamiento). El expediente y la ficha del pasajero se retiran porque allí
+   * mandan otros paneles y la esquina derecha ya está ocupada por el marcador.
+   */
+  setModoZona(on) {
+    this.$('expediente').classList.toggle('oculto', on);
+    if (on) this.hideFicha();
   }
 
   /** Oculta todos los paneles de herramienta (cambio de contexto limpio). */

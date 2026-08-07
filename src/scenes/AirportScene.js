@@ -23,6 +23,11 @@ import { narrator } from '../audio/Narrator.js';
 import { TurnManager } from '../gameplay/TurnManager.js';
 import { HUD } from '../ui/HUD.js';
 import { coach } from '../ui/JustusCoach.js';
+import { puntaje, VALOR } from '../core/Puntaje.js';
+import { Marcador } from '../ui/Marcador.js';
+import { CanalRojo } from '../gameplay/CanalRojo.js';
+import { Dirandro } from '../gameplay/Dirandro.js';
+import { Perfilamiento } from '../gameplay/Perfilamiento.js';
 
 /**
  * main — el director de orquesta.
@@ -53,8 +58,30 @@ const motas = new Motas(scene, {
 });
 const xray = new XRayView(renderer.gl);
 const hud = new HUD(document.getElementById('hud-root'));
+const marcador = new Marcador(document.getElementById('hud-root'));
 const turn = new TurnManager();
 const engine = new Engine();
+
+// El canal rojo vive DENTRO de esta terminal (a la derecha del puesto): entrar
+// es un movimiento de cámara, no una carga de nivel. El decorado se construye
+// la primera vez que se deriva a alguien.
+const canal = new CanalRojo({
+  scene, cine, audio, justus, hud, canvas,
+  base: new THREE.Vector3(9.2, 0, -4.2),
+});
+
+// La sala de DIRANDRO se levanta lejos del hall y con paredes propias: el
+// encierro tiene que ser real. Se construye solo si un caso llega hasta ahí.
+const dirandro = new Dirandro({
+  scene, cine, audio, hud,
+  base: new THREE.Vector3(26, 0, -4),
+});
+
+// Acto 1 del turno: el mirador sobre la sala de llegadas.
+const perfil = new Perfilamiento({
+  scene, cine, audio, hud, canvas,
+  base: new THREE.Vector3(0, 0, -10.5),
+});
 
 // ── Estado de sesión ──────────────────────────────────────────────────────
 let actor = null;            // PassengerActor en el puesto
@@ -79,6 +106,14 @@ engine.add(newsTV);
 engine.add(police);
 engine.add(motas);
 engine.add({ update: (dt, t) => actor?.update(dt, t) });
+engine.add({
+  update(dt, t) {
+    canal.update(dt, t);
+    canal.tick(dt);
+    dirandro.update(dt, t);
+    perfil.update(dt, t);
+  },
+});
 engine.add(cine);
 engine.add({
   update(dt, t) {
@@ -102,8 +137,97 @@ engine.add({
 });
 
 // ── Flujo del turno ───────────────────────────────────────────────────────
+/**
+ * El turno tiene tres actos desde ADR-012:
+ *
+ *   1. **PERFILAMIENTO** — el mirador sobre la sala de llegadas: a quién derivas.
+ *   2. **CANAL ROJO** — si marcaste a alguien, su equipaje sobre la mesa. Aquí
+ *      es donde el acierto (o el error) del acto 1 se paga en carne.
+ *   3. **PUESTO** — el bucle clásico de cuatro pasajeros, que no se toca.
+ *
+ * Y dentro del acto 3, sellar RETENIDO o DERIVADO vuelve a abrir el canal rojo
+ * (y, si aparece sustancia, la sala de DIRANDRO). El nivel dejó de ser un
+ * mostrador para pasar a ser un recorrido por el control entero.
+ */
 function beginTurn() {
-  turn.iniciarTurno();
+  puntaje.reiniciarTurno(); // el marcador es del TURNO; el récord sobrevive aparte
+  iniciarPerfilamiento();
+}
+
+/** Qué esconde el equipaje de alguien derivado desde el perfilamiento. */
+const TIPOS_PERFILADO = ['dinero', 'mercancia', 'fauna', 'patrimonio', 'sustancia'];
+
+/** Justus explica el perfilamiento. Cuatro frases y la regla que no se negocia. */
+const PASOS_JUSTUS_PERFILAMIENTO = [
+  {
+    txt: '¡Jefe! Antes del mostrador, el mirador. Desde aquí se ve la sala entera y hay que elegir a quién bajamos al canal rojo. Una sola derivación, así que vamos a hacerla bien.',
+  },
+  {
+    txt: 'Toque a cualquiera para observarlo. Su ficha NO trae foto ni pinta ni de dónde es: trae lo que la persona ESTÁ HACIENDO. Es lo único que después se puede escribir en un acta.',
+  },
+  {
+    txt: 'Y ojo con lo obvio: el que suda, el que corre, la señora agobiada con el crío. Casi siempre es gente honesta pasándolo mal. Lo que buscamos es a quien EVITA el control, no a quien lo sufre.',
+  },
+  {
+    txt: 'Última cosa, y es la importante. Si al firmar el acta pone «por su color», «por cómo viste» o «por su país», el supervisor se la devuelve y yo dejo de saludarlo. Aquí se marca por conducta. Punto.',
+    foco: '.pf-cab',
+  },
+];
+
+function iniciarPerfilamiento() {
+  hud.setModoZona(true);
+  hud.hideTools();
+  hud.hideDock();
+  hud.hideDialog();
+  hud.clearSeñales();
+  hud.setTopbar({
+    turno: turn.turnoN, franja: `${turn.reputacion}/100`, alerta: 'ACTO 1 · PERFILAMIENTO',
+  });
+  narrator.decir(null, 'Sala de llegadas. Mira quién viene, no cómo viene vestido.', { esNarrador: true });
+  // El figurantaje del hall se retira: comparte zona con el grupo del
+  // perfilamiento y, al no responder al dedo, solo genera clics fallidos.
+  npcs.setVisible(false);
+
+  // La clase magistral del acto 1, una sola vez en la carrera. Justus lo explica
+  // porque viniendo de él la regla antisesgo no suena a cartel institucional:
+  // suena a un veterano diciéndote cómo se hace el trabajo.
+  if (turn.turnoN === 1) {
+    setTimeout(() => coach.guiar('perfilamiento', PASOS_JUSTUS_PERFILAMIENTO), 2400);
+  } else {
+    coach.setPata(true);
+  }
+
+  perfil.abrir({
+    onCerrar: ({ marcada, acierto }) => {
+      if (!marcada) { arrancarPuesto(); return; }
+      hud.setTopbar({
+        turno: turn.turnoN, franja: `${turn.reputacion}/100`, alerta: 'ACTO 2 · CANAL ROJO',
+      });
+      // Aquí se cierra el círculo del acto 1: si acertaste hay algo dentro; si
+      // te equivocaste de persona, el operativo sale vacío y hay que verlo.
+      canal.abrir({
+        tipo: acierto ? TIPOS_PERFILADO[Math.floor(Math.random() * TIPOS_PERFILADO.length)] : 'nada',
+        titular: marcada.nombre,
+        onCerrar: ({ derivaDirandro }) => {
+          if (!derivaDirandro) { arrancarPuesto(); return; }
+          dirandro.abrir({
+            titular: marcada.nombre,
+            hayHallazgo: true,
+            onCerrar: () => arrancarPuesto(),
+          });
+        },
+      });
+    },
+  });
+}
+
+function arrancarPuesto() {
+  hud.setModoZona(false);
+  npcs.setVisible(true);
+  audio.setFocus('mundo');
+  tensionExtra = 0;
+  cine.goTo(Vista.PUESTO, { duration: 1.6 });
+  setTimeout(() => turn.iniciarTurno(), 900);
 }
 
 bus.on(Señal.TURNO_INICIADO, ({ turno, briefing }) => {
@@ -297,6 +421,8 @@ function refreshInterrogationSoon() {
 function reportAbuse() {
   turn.registrarAbuso();
   cine.shake(0.8);
+  puntaje.sumar(VALOR.abuso, 'EXCESO SIN INDICIOS',
+    { detalle: 'Presionar sin nada escrito no es firmeza: es un procedimiento que no se sostiene.' });
 }
 
 bus.on(Señal.QUIEBRE, ({ es_culpable }) => {
@@ -309,6 +435,7 @@ bus.on(Señal.QUIEBRE, ({ es_culpable }) => {
     actor.gesto('quiebre_confiesa');
     decir(caso.perfil.nombre, caso.dialogos.quiebre, { cps: 32 });
     hud.toast('QUIEBRE: la confesión queda registrada. El caso está prácticamente resuelto.');
+    puntaje.sumar(VALOR.quiebreCulpable, 'QUIEBRE CON BASE · confesión registrada');
   } else {
     // El falso positivo tiene rostro: escena de consecuencia inmediata (P4).
     actor.gesto('quiebre_colapso');
@@ -317,6 +444,8 @@ bus.on(Señal.QUIEBRE, ({ es_culpable }) => {
     hud.dialog('', caso.dialogos.quiebre, 30);
     narrator.decir(null, caso.dialogos.quiebre, { esNarrador: true });
     hud.toast('Quebraste a una inocente. La fila entera lo vio. Tu reputación paga.', { alerta: true, dur: 5200 });
+    puntaje.sumar(VALOR.quiebreInocente, 'QUEBRASTE A UNA PERSONA INOCENTE',
+      { detalle: 'El estrés alto NO es culpa. Mucha gente honesta se desarma frente a un uniforme.' });
   }
   setTimeout(refreshInterrogation, 400);
 });
@@ -329,6 +458,8 @@ bus.on(Señal.FUGA, () => {
   hud.hideTools();
   hud.hideDock();
   hud.hideDialog();
+  puntaje.sumar(VALOR.fuga, 'FUGA = FLAGRANCIA',
+    { detalle: 'Correr ante el control es, por sí solo, evidencia plena.' });
 
   // 1) El estallido: gira y corre. La cámara abre y persigue con la mirada.
   audio.stinger();
@@ -490,10 +621,19 @@ function openDecision() {
     desk.stamp(decisionId, dudar, () => {
       const resultado = turn.decidir(decisionId, { confesion });
       const escoltado = ['RETENIDO', 'DERIVADO'].includes(decisionId);
+      puntaje.porVeredicto(resultado.calidad);
       actor.salir({ escoltado });
       hud.hideFicha();
-      cine.goTo(Vista.PUESTO, { duration: 1.8 });
       tensionExtra = resultado.calidad === 'fallo' ? 0.3 : 0.1;
+
+      // RETENIDO y DERIVADO ya no son un párrafo: son la puerta del canal rojo.
+      // El sello deja de ser el final del caso y pasa a ser su segundo acto.
+      if (escoltado) {
+        setTimeout(() => entrarCanalRojo(resultado, turn.caso), 1100);
+        return;
+      }
+
+      cine.goTo(Vista.PUESTO, { duration: 1.8 });
       setTimeout(() => {
         hud.showConsequence(resultado.escena, presentNext);
         narrator.decir(null, resultado.escena, { esNarrador: true });
@@ -501,6 +641,74 @@ function openDecision() {
       }, 900);
     });
   });
+}
+
+// ── Acto 3: el canal rojo (`02 - Diseño/12`) ─────────────────────────────
+/**
+ * Qué esconde el equipaje de cada caso. La coherencia importa: derivar a Doña
+ * Rosa manda al canal un operativo VACÍO, y el jugador tiene que descubrir por
+ * sí mismo que no hay nada — la lección que ningún texto sustituye.
+ */
+const HALLAZGO_POR_CASO = {
+  'CASO-101': 'mercancia',
+  'CASO-102': 'nada',
+  'CASO-103': 'sustancia',
+  'CASO-104': 'patrimonio',
+  'CASO-105': 'dinero',
+  'CASO-106': 'fauna',
+};
+
+function entrarCanalRojo(resultado, caso) {
+  hud.hideTools();
+  hud.hideDock();
+  hud.hideDialog();
+  hud.setModoZona(true);
+  coach.setPata(false);
+  tensionExtra = 0.25;
+
+  canal.abrir({
+    tipo: HALLAZGO_POR_CASO[caso.id] ?? 'mercancia',
+    titular: caso.perfil.nombre,
+    onCerrar: ({ derivaDirandro }) => {
+      if (derivaDirandro) entrarDirandro(resultado, caso);
+      else volverAlPuesto(resultado, caso);
+    },
+  });
+}
+
+/**
+ * El escalón siguiente: cuando el canal rojo encuentra indicio de sustancia,
+ * Aduanas deja de ser competente y entra la Policía. El corte a negro no es
+ * estética: marca que se cruzó una puerta que no se cruza a la ligera.
+ */
+function entrarDirandro(resultado, caso) {
+  hud.showConsequence(
+    'Indicio de sustancia controlada. Aduanas deja de ser competente: se convoca a DIRANDRO '
+    + 'y el equipaje pasa a la sala de revisión intrusiva.',
+    () => {
+      dirandro.abrir({
+        titular: caso.perfil.nombre,
+        // El único caso del set con carga corporal real es el mochilero (G3).
+        // En los demás, llegar aquí significa que el jugador escaló de más — y
+        // el acta se lo va a decir.
+        hayHallazgo: caso.id === 'CASO-103',
+        onCerrar: () => volverAlPuesto(resultado, caso),
+      });
+    },
+  );
+  narrator.decir(null, 'Indicio de sustancia. Entra DIRANDRO.', { esNarrador: true });
+}
+
+function volverAlPuesto(resultado, caso) {
+  hud.setModoZona(false);
+  tensionExtra = 0.1;
+  cine.goTo(Vista.PUESTO, { duration: 1.6 });
+  audio.setFocus('mundo');
+  setTimeout(() => {
+    hud.showConsequence(resultado.escena, presentNext);
+    narrator.decir(null, resultado.escena, { esNarrador: true });
+    bus.emit(Señal.CONSECUENCIA_MOSTRADA, { caso_id: caso.id });
+  }, 800);
 }
 
 // ── Cierre del turno: el Noticiero primero, la Hoja de Servicio después ───
@@ -530,13 +738,18 @@ bus.on(Señal.TURNO_FINALIZADO, (data) => {
       audio.setFocus('mundo');
       tensionExtra = 0;
       cine.goTo(Vista.PUESTO, { duration: 1.4 });
-      hud.showSummary(data, beginTurn);
+      hud.showSummary({ ...data, balanceHTML: Marcador.balanceHTML() }, beginTurn);
     });
   }, 2600);
 });
 
 // ── Expediente en pantalla ────────────────────────────────────────────────
-bus.on(Señal.SENAL_REGISTRADA, ({ texto }) => hud.addSeñal(texto));
+// Cada señal anotada suma en el acto: el jugador ve que documentar PAGA, que es
+// exactamente la lección aduanera que el juego quiere dejar (Regla de Oro §2).
+bus.on(Señal.SENAL_REGISTRADA, ({ texto }) => {
+  hud.addSeñal(texto);
+  puntaje.sumar(VALOR.senal, 'SEÑAL ANOTADA EN EL EXPEDIENTE', { detalle: texto });
+});
 
 // ── Interacción directa: TOCAR al pasajero en el close-up ─────────────────
 // El cuerpo es la interfaz (regla 6 del interrogatorio): si el jugador toca la
@@ -562,6 +775,7 @@ canvas.addEventListener('pointerdown', (e) => {
       hud.toast('Tell anotado en el expediente.');
     } else {
       hud.toast('Anotado: el cuerpo reaccionó. Sigue leyendo el patrón.');
+      puntaje.sumar(VALOR.tell, 'TELL ATRAPADO', { detalle: 'Leíste el cuerpo en el momento exacto en que habló.' });
     }
     ultimoTell = null;
   } else {
@@ -590,14 +804,31 @@ document.getElementById('btn-start').addEventListener('click', () => {
 // El mundo ya respira detrás del título.
 engine.start();
 
-// ── Atajo de prueba para forzar FUGA ──────────────────────────────────────
+// ── Atajos de QA ──────────────────────────────────────────────────────────
+// F = forzar FUGA · C = canal rojo · D = sala intrusiva de DIRANDRO.
+// (El mismo criterio que F9 en el Nivel 3: probar una fase sin jugar la previa.)
 window.addEventListener('keydown', (e) => {
-  if ((e.key === 'f' || e.key === 'F') && actor) {
-    bus.emit(Señal.FUGA, { caso_id: turn.caso.id });
+  const k = e.key.toLowerCase();
+  if (k === 'f' && actor) bus.emit(Señal.FUGA, { caso_id: turn.caso.id });
+  if (k === 'c' && turn.caso && !canal.activo) {
+    entrarCanalRojo({ escena: 'Fin del ensayo de QA.' }, turn.caso);
+  }
+  if (k === 'p' && !perfil.activo && !canal.activo && !dirandro.activo) iniciarPerfilamiento();
+  if (k === 'd' && turn.caso && !dirandro.activo) {
+    hud.setModoZona(true);
+    hud.hideTools(); hud.hideDock(); hud.hideDialog();
+    dirandro.abrir({
+      titular: turn.caso.perfil.nombre,
+      hayHallazgo: true,
+      onCerrar: () => volverAlPuesto({ escena: 'Fin del ensayo de QA.' }, turn.caso),
+    });
   }
 });
 
 // Gancho de depuración (solo dev): permite inspeccionar sistemas desde la consola.
 if (import.meta.env?.DEV) {
-  window.__AH = { bus, Señal, turn, cine, newsTV, justus, audio, renderer, xray, hud, motas };
+  window.__AH = {
+    bus, Señal, turn, cine, newsTV, justus, audio, renderer, xray, hud, motas,
+    canal, dirandro, perfil, puntaje,
+  };
 }

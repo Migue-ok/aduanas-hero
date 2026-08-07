@@ -28,6 +28,7 @@ export class Justus {
     this.home = new THREE.Vector3(-1.7, 0, -0.9);
     this.group.position.copy(this.home);
     this.group.rotation.y = 0.35;
+    this.rotHome = 0.35; // orientación de reposo; `mudarPuesto` la cambia por zona
 
     this.ocupado = false;
     this.alertaAlta = false;
@@ -238,6 +239,104 @@ export class Justus {
     });
   }
 
+  /**
+   * Reubica el puesto del perro. El Canal Rojo y la sala intrusiva viven en otra
+   * parte de la terminal: sin esto, Justus se quedaría trabajando a doce metros
+   * de la mesa que está oliendo.
+   *
+   * @param {THREE.Vector3} pos  nuevo `home`
+   * @param {number} rotY        orientación en reposo
+   * @param {boolean} teletransporte  true = aparece ya ahí (cambio de zona con corte)
+   */
+  mudarPuesto(pos, rotY = 0, teletransporte = true) {
+    this.home.copy(pos);
+    gsap.killTweensOf([this.group.position, this.group.rotation]);
+    if (teletransporte) {
+      this.group.position.copy(pos);
+      this.group.rotation.y = rotY;
+    } else {
+      gsap.to(this.group.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.4, ease: 'power2.inOut' });
+      gsap.to(this.group.rotation, { y: rotY, duration: 1, ease: 'power2.inOut' });
+    }
+    this.rotHome = rotY;
+  }
+
+  /**
+   * EL ESCÁNER CANINO (`02 - Diseño/12 - Canal Rojo y Sala Intrusiva`). Justus recorre una fila de
+   * objetivos y olfatea uno por uno. Su ladrido no es binario: la intensidad
+   * (`calor`, 0..1) crece cuanto más cerca está del olor real, de modo que el
+   * jugador puede triangular la maleta buena por la REACCIÓN DEL PERRO antes de
+   * gastar su única apertura.
+   *
+   * Regla de oficio que el juego respeta: un can detector **no señala delitos,
+   * señala olores**. Por eso puede ladrar con fuerza media sobre una maleta que
+   * solo lleva restos de olor — y por eso el jugador tiene que cruzar el marcaje
+   * con los indicios físicos en vez de obedecer al perro sin pensar.
+   *
+   * @param {Array<{pos: THREE.Vector3, calor: number, marca?: boolean}>} objetivos
+   * @param {{onOlfatear?: Function, onMarcar?: Function}} cbs
+   */
+  barrer(objetivos, { onOlfatear, onMarcar } = {}) {
+    if (this.ocupado) return Promise.resolve();
+    this.ocupado = true;
+
+    return new Promise((resolve) => {
+      const tl = gsap.timeline({
+        onComplete: () => { this.ocupado = false; resolve(); },
+      });
+
+      objetivos.forEach((obj, i) => {
+        // Se planta SIEMPRE del lado del jugador (z positivo respecto al objeto):
+        // así el barrido se ve de perfil y nunca queda tapado por las maletas.
+        const stand = new THREE.Vector3(obj.pos.x, 0, obj.pos.z + 0.62);
+        const angulo = Math.atan2(obj.pos.x - stand.x, obj.pos.z - stand.z);
+
+        tl.to(this.group.position, { x: stand.x, z: stand.z, duration: i === 0 ? 1.1 : 0.72, ease: 'power2.inOut' });
+        tl.to(this.group.rotation, { y: angulo, duration: 0.3, ease: 'power2.out' }, '<0.25');
+
+        // Baja el hocico a la altura de la maleta y barre de lado a lado.
+        tl.to(this.head.position, { y: Math.max(0.26, obj.pos.y - 0.05), z: 0.46, duration: 0.34, ease: 'power2.inOut' });
+        tl.to(this.neck.rotation, { x: 1.1, duration: 0.34 }, '<');
+        tl.call(() => {
+          this.audio.olfateo();
+          onOlfatear?.(i, obj.calor);
+        });
+        tl.to(this.head.rotation, { y: 0.3, duration: 0.28, ease: 'sine.inOut' });
+        tl.to(this.head.rotation, { y: -0.3, duration: 0.34, ease: 'sine.inOut' });
+        tl.to(this.head.rotation, { y: 0, duration: 0.2 });
+
+        // La reacción: proporcional al olor. Cuanto más caliente, más ladra y
+        // más se le tensa el cuerpo.
+        tl.call(() => this.audio.ladrido(obj.calor));
+        const golpes = 1 + Math.round(obj.calor * 3);
+        tl.to(this.head.position, { y: `+=${0.02 + obj.calor * 0.04}`, duration: 0.1,
+          repeat: golpes, yoyo: true, ease: 'power2.out' });
+
+        if (obj.marca) {
+          // EL MARCAJE: se sienta y NO se mueve. La señal que no se discute.
+          tl.add(this.#tlCabezaNeutra());
+          tl.call(() => { onMarcar?.(i); this.audio.ladrido(1); });
+          tl.to(this.body.rotation, { x: -0.5, duration: 0.4, ease: 'power2.inOut' });
+          tl.to(this.body.position, { y: 0.33, duration: 0.4 }, '<');
+          tl.to([this.legs[2].rotation, this.legs[3].rotation], { x: -1.1, duration: 0.4, ease: 'power2.inOut' }, '<');
+          tl.to(this.head.position, { y: 0.76, duration: 0.36 }, '<');
+          tl.call(() => this.audio.ladrido(1));
+          tl.to(this.head.position, { y: '+=0.035', duration: 0.09, repeat: 5, yoyo: true });
+          tl.to({}, { duration: 0.9 }); // sostiene: el perro se queda ahí
+          tl.to(this.body.rotation, { x: 0.06, duration: 0.45, ease: 'power2.inOut' });
+          tl.to(this.body.position, { y: 0.42, duration: 0.45 }, '<');
+          tl.to([this.legs[2].rotation, this.legs[3].rotation], { x: 0, duration: 0.45 }, '<');
+        } else {
+          tl.add(this.#tlCabezaNeutra());
+        }
+      });
+
+      // Vuelve a su sitio a esperar la decisión del oficial.
+      tl.to(this.group.position, { x: this.home.x, z: this.home.z, duration: 1, ease: 'power1.inOut' });
+      tl.to(this.group.rotation, { y: this.rotHome ?? 0.35, duration: 0.5 }, '<0.4');
+    });
+  }
+
   #tlCabezaNeutra() {
     const tl = gsap.timeline();
     tl.to(this.head.position, { x: 0, y: this.headHome.y, z: this.headHome.z, duration: 0.5, ease: 'power2.inOut' });
@@ -256,7 +355,7 @@ export class Justus {
     ]);
     this.ocupado = false;
     gsap.to(this.group.position, { x: this.home.x, z: this.home.z, duration: 0.8, ease: 'power2.inOut' });
-    gsap.to(this.group.rotation, { y: 0.35, duration: 0.6 });
+    gsap.to(this.group.rotation, { y: this.rotHome, duration: 0.6 });
     gsap.to(this.head.position, { x: 0, y: this.headHome.y, z: this.headHome.z, duration: 0.5 });
     gsap.to(this.head.rotation, { x: 0, y: 0, duration: 0.5 });
     gsap.to(this.neck.rotation, { x: 0.7, duration: 0.5 });

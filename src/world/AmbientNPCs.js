@@ -83,6 +83,18 @@ export class AmbientNPCs {
   }
 
   /**
+   * Apaga (o enciende) todo el figurantaje.
+   *
+   * Hace falta para el acto de perfilamiento: ese minijuego pone SU propio grupo
+   * de gente en la misma zona del hall, y con los caminantes y la fila del puesto
+   * encima el jugador no distingue a quién puede observar y a quién no. Un
+   * figurante que no responde al dedo es peor que ningún figurante.
+   */
+  setVisible(on) {
+    this.group.visible = !!on;
+  }
+
+  /**
    * La fila avanza un puesto. El primero NO se desliza hacia atrás a la vista
    * de todos (rompía la lógica): desaparece hacia el puesto y reaparece
    * llegando por el fondo, como un pasajero nuevo que se suma a la cola.
