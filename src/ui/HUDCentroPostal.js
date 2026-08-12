@@ -87,9 +87,8 @@ export class HUDCentroPostal {
         <div class="cp-per-card g-panel">
           <div class="cp-per-tag">MESA DE PERITAJE</div>
           <h2>ARMA EL ACTA DE DECOMISO</h2>
-          <p class="cp-per-que">Un <b>acta de decomiso</b> es el documento con el que la aduana justifica
-            quedarse con la mercancía. Si no se sostiene, el envío se devuelve y el caso se cae.
-            <b>Tu trabajo ahora es demostrar lo que encontraste.</b></p>
+          <p class="cp-per-que">Un <b>acta de decomiso</b> es el papel con el que la aduana se queda
+            la mercancía. Si no se sostiene, el envío se devuelve.</p>
 
           <div class="cp-per-tag2">1 · LO QUE TIENE QUE CUMPLIR</div>
           <div class="cp-per-check"></div>
@@ -334,6 +333,11 @@ export class HUDCentroPostal {
   togglePanel(cual) {
     if (this.panelAbierto === cual) { this.cerrarPanel(); return; }
     this.panelAbierto = cual;
+    // Modo modal también aquí. Estaba solo en el peritaje y en el cierre, así
+    // que con el Diario o el Códice abiertos seguían encendidos por detrás la
+    // hotbar, la columna de accesos y las marcas flotantes de los paquetes:
+    // dos interfaces completas discutiéndose la misma pantalla de 375 px.
+    this.el.classList.add('cp-modal');
     this.#pintarPanel(cual);
     abrirVelo(this.$panel, { duration: 0.28 });
     gsap.fromTo(this.$panelCard, { opacity: 0, y: 24, scale: 0.96 },
@@ -345,6 +349,7 @@ export class HUDCentroPostal {
   cerrarPanel() {
     if (!this.panelAbierto) return;
     this.panelAbierto = null;
+    this.el.classList.remove('cp-modal');
     cerrarVelo(this.$panel, { duration: 0.2 });
   }
 
@@ -377,18 +382,50 @@ export class HUDCentroPostal {
       for (const f of CODICE) {
         (grupos[f.grupo] ??= []).push(f);
       }
-      const cuerpo = Object.entries(grupos).map(([g, fichas]) => `
+      // Las fichas BLOQUEADAS se cuentan, no se pintan.
+      //
+      // Antes cada una ocupaba su propio bloque con «▮▮▮▮▮▮▮▮» y la misma frase
+      // repetida: el Códice abría con 1413 caracteres y casi tres pantallas de
+      // arrastre, la mayoría relleno de cosas que el jugador no puede leer. Al
+      // contarlas en una línea, lo que se ve es lo que se ha ganado —y el panel
+      // CRECE conforme se juega, que es lo que hace que apetezca volver a abrirlo.
+      let pendientes = 0;
+      const cuerpo = Object.entries(grupos).map(([g, fichas]) => {
+        const abiertas = fichas.filter((f) => this.codiceVisto.has(f.llave));
+        pendientes += fichas.length - abiertas.length;
+        if (!abiertas.length) return '';
+        return `
         <div class="cp-cod-grupo">
           <div class="cp-p-tag2">${g}</div>
-          ${fichas.map((f) => (this.codiceVisto.has(f.llave)
-            ? `<div class="cp-cod"><b>${f.termino}</b><p>${f.texto}</p></div>`
-            : '<div class="cp-cod bloq"><b>▮▮▮▮▮▮▮▮</b><p>Ficha por descubrir: úsala en la nave y se abre sola.</p></div>')).join('')}
-        </div>`).join('');
+          ${abiertas.map((f) => {
+    // DOS NIVELES: la definición y el desarrollo. Cada ficha era un párrafo de
+    // tres o cuatro líneas y el Códice se leía como un examen. Se parte por la
+    // primera oración —que es, en todas, la definición— y el resto se despliega
+    // a quien le interese. No se pierde una palabra del contenido educativo:
+    // se le da orden de lectura. `<details>` nativo: sin JS y accesible.
+    const corte = f.texto.indexOf('. ');
+    const hayDos = corte > 0 && corte < 150 && corte + 2 < f.texto.length;
+    const def = hayDos ? f.texto.slice(0, corte + 1) : f.texto;
+    const resto = hayDos ? f.texto.slice(corte + 2) : '';
+    return resto
+      ? `<details class="cp-cod">
+             <summary><b>${f.termino}</b><span>${def}</span><i class="cp-cod-mas">más</i></summary>
+             <p>${resto}</p>
+           </details>`
+      : `<div class="cp-cod"><b>${f.termino}</b><p>${def}</p></div>`;
+  }).join('')}
+        </div>`;
+      }).join('');
+      const pie = pendientes
+        ? `<div class="cp-cod-pend">🔒 <b>${pendientes}</b> ficha${pendientes > 1 ? 's' : ''} por
+             descubrir. Se abren solas al usarlas en la nave.</div>`
+        : '<div class="cp-cod-pend cp-cod-pend--full">✔ Códice completo. Todas las fichas abiertas.</div>';
       this.$panelCard.innerHTML = `
         ${cerrar}
         <div class="cp-p-tag">CÓDICE ADUANERO</div>
         <h2 class="g-title">LO QUE APRENDES SE QUEDA</h2>
-        <div class="cp-cods">${cuerpo}</div>`;
+        <div class="cp-cods">${cuerpo || '<p class="cp-vacio">Aún no has abierto ninguna ficha.</p>'}</div>
+        ${pie}`;
     }
     this.$panelCard.querySelector('.cp-cerrar').addEventListener('click', () => this.cerrarPanel());
     cascada(this.$panelCard.querySelectorAll('.cp-obj, .cp-cod, .cp-hilo, .cp-nota'),
@@ -397,36 +434,22 @@ export class HUDCentroPostal {
 
   // ── Briefing y cierre ─────────────────────────────────────────────────────
   abrirBriefing({ nombre, briefing, indice, total, primera }) {
+    // El briefing es una hoja a pantalla completa y la oleada aún no ha
+    // empezado: el HUD de juego de debajo no informa de nada y solo compite.
+    this.el.classList.add('cp-modal');
     this.$veloCard.innerHTML = `
       <div class="cp-p-tag">CENTRO DE CLASIFICACIÓN POSTAL · LIMA</div>
       <h2 class="g-title">${nombre}</h2>
       <p class="cp-brief">${briefing}</p>
       ${primera ? `
-        <div class="cp-comose">
-          <div class="cp-paso"><i>1</i><div><b>Acércate al bulto</b>
-            <span>El más cercano se marca solo. Su ficha aparece a la izquierda.</span></div></div>
-          <div class="cp-paso"><i>2</i><div><b>Lee el cartel ⚠ que lleva encima</b>
-            <span>Ahí está escrito qué le pasa. Un bulto sin cartel está limpio: no lo toques.</span></div></div>
-          <div class="cp-paso"><i>3</i><div><b>Pregúntate de qué habla</b>
-            <span>¿De la forma, del papel, del olor o del peso? Esa es la herramienta.</span></div></div>
-          <div class="cp-paso"><i>4</i><div><b>Dispara el pulso</b>
-            <span>${isTouch ? 'Botón ESCANEAR' : 'Espacio o clic'}. Si acertaste la herramienta, el bulto se intercepta.</span></div></div>
-        </div>
+        <div class="cp-regla-corta">Lee el cartel <b>⚠</b> del bulto y dispárale la herramienta
+          que habla de eso mismo.</div>
         <div class="cp-p-tag2">TU CINTURÓN · CADA UNA LEE UNA COSA</div>
-        <div class="cp-tools">
-          ${HERRAMIENTAS.map((h, i) => `
+        <div class="cp-tools cp-tools--tira">
+          ${HERRAMIENTAS.map((h) => `
             <div class="cp-tool" style="--tono:${h.css}">
-              <div class="cp-tool-cab"><i>${h.icono}</i>
-                <div><b>${h.nombre}</b><em>${isTouch ? 'botón ' + h.nombre : 'tecla ' + (i + 1)} · ${h.familia}</em></div>
-              </div>
-              <span>${h.pista}</span>
+              <i>${h.icono}</i><b>${h.nombre}</b><em>${h.familia}</em>
             </div>`).join('')}
-        </div>
-        <div class="cp-controles">
-          <div><b>${isTouch ? 'Joystick' : 'W A S D'}</b><span>recorrer el pasillo</span></div>
-          <div><b>${isTouch ? 'PERITAJE' : 'Tecla E'}</b><span>mesa de peritaje</span></div>
-          <div><b>${isTouch ? 'CASOS' : 'M'}</b><span>casos del turno</span></div>
-          <div><b>${isTouch ? 'CÓDICE' : 'C'}</b><span>códice aduanero</span></div>
         </div>` : ''}
       <div class="cp-ol-progreso">OLEADA ${indice + 1} DE ${total}</div>
       <button class="g-btn g-btn--primary cp-empezar">▶ ${primera ? 'ENTRAR EN SERVICIO' : 'ARRANCAR LA CINTA'}</button>`;
@@ -436,12 +459,16 @@ export class HUDCentroPostal {
         onComplete: () => gsap.set(this.$veloCard, { clearProps: 'transform,opacity' }) });
     this.$veloCard.querySelector('.cp-empezar').addEventListener('click', () => {
       audio.clic('firme');
+      this.el.classList.remove('cp-modal');
       cerrarVelo(this.$velo, { duration: 0.3 });
       this.cb.onIniciar();
     });
   }
 
-  cerrarVeloAhora() { cerrarVelo(this.$velo, { duration: 0.2 }); }
+  cerrarVeloAhora() {
+    this.el.classList.remove('cp-modal');
+    cerrarVelo(this.$velo, { duration: 0.2 });
+  }
 
   /** Hoja de cierre del operativo. */
   abrirCierre({ titulo, texto, filas, balanceHTML, motivo }) {
@@ -477,6 +504,14 @@ export class HUDCentroPostal {
     this.evidencias = evidencias;
     this.huecosActa = huecos;
     this.el.classList.add('cp-modal');
+    // Qué es un acta se explica UNA vez por partida. A la tercera oleada el
+    // jugador ya lo sabe y ese párrafo solo empuja hacia abajo lo que sí tiene
+    // que mirar: los tres requisitos y las pruebas que puede colocar.
+    // `!!`: con `undefined` como segundo argumento, `toggle` lo trata como «no
+    // me lo has pasado» y alterna — o sea, ocultaba el párrafo justo la primera
+    // vez y lo enseñaba a partir de la segunda, exactamente al revés.
+    this.$peritaje.querySelector('.cp-per-que').classList.toggle('oculto-def', !!this.periVisto);
+    this.periVisto = true;
     this.$peritaje.querySelector('.cp-per-veredicto').innerHTML = '';
     this.#pintarPeritaje();
     abrirVelo(this.$peritaje, { duration: 0.42 });
@@ -750,6 +785,7 @@ export class HUDCentroPostal {
       }
       .cp-ficha.hidden, .cp-aviso.hidden, .cp-panel.hidden,
       .cp-peritaje.hidden, .cp-velo.hidden, .cp-fallo.hidden { display: none; }
+      .oculto-def { display: none !important; }
       .cp-fi-cab { display: flex; justify-content: space-between; align-items: baseline;
         margin-bottom: 7px; font-family: var(--f-data, monospace); }
       .cp-fi-cab b { font-size: 12px; letter-spacing: .12em; color: var(--a-amber, #e0952a); }
@@ -836,8 +872,13 @@ export class HUDCentroPostal {
         -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
       }
       .cp-panel-card, .cp-per-card, .cp-velo-card, .cp-fallo-card {
-        position: relative; width: min(720px, 94vw); max-height: 92vh; overflow-y: auto;
-        padding: clamp(18px, 3vw, 28px);
+        /* El ancho se mide contra el HUECO REAL (100% del contenedor, que ya
+           descuenta su propio padding), no contra 94vw: sumados, la hoja al
+           94vw y el padding del velo pasaban de 100vw en pantallas de 375 px y
+           la tarjeta salia recortada por el borde derecho. */
+        position: relative; width: min(720px, 100%); max-width: 100%;
+        max-height: 100%; overflow-y: auto; overscroll-behavior: contain;
+        padding: clamp(14px, 3vw, 28px);
         /* OPACA, no cristal. La primitiva g-panel es translúcida por diseño —
            correcta para una píldora del HUD flotando sobre la escena— pero
            detrás de una hoja de servicio con veinte líneas de texto deja pasar
@@ -856,7 +897,10 @@ export class HUDCentroPostal {
       #cp-hud.cp-modal .cp-marcas,
       #cp-hud.cp-modal .cp-aviso { opacity: 0; pointer-events: none; transition: opacity .25s; }
       .cp-cerrar {
-        position: absolute; top: 10px; right: 12px; width: 38px; height: 38px; border-radius: 10px;
+        /* 44 px es el mínimo táctil: con 38 se fallaba el toque a la primera y
+           el jugador acababa pulsando el texto de detrás. */
+        position: absolute; top: 8px; right: 8px; width: 44px; height: 44px;
+        min-width: 44px; min-height: 44px; border-radius: 10px; z-index: 2;
         background: rgba(20,28,40,.8); color: #b9c6d4; border: 1px solid rgba(148,176,208,.2); font-size: 15px;
       }
       .cp-cerrar:hover { color: #fff; border-color: var(--a-red, #e04a3c); }
@@ -885,43 +929,72 @@ export class HUDCentroPostal {
       .cp-cod b { font-family: var(--f-data, monospace); font-size: 12px; letter-spacing: .1em;
         color: var(--a-cyan, #4fd0e0); }
       .cp-cod p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: #b3c1d0; }
+
+      /* Ficha en dos niveles: la definición se lee siempre, el desarrollo se pide. */
+      details.cp-cod { padding: 0; }
+      details.cp-cod > summary {
+        list-style: none; cursor: pointer; padding: 10px 13px; border-radius: 8px;
+        min-height: 44px; display: flex; flex-direction: column; justify-content: center;
+        position: relative; padding-right: 52px;
+      }
+      details.cp-cod > summary::-webkit-details-marker { display: none; }
+      details.cp-cod > summary span { display: block; margin-top: 3px;
+        font-size: 12.5px; line-height: 1.55; color: #b3c1d0; }
+      /* El «más» es la única promesa de que ahí abajo hay algo. */
+      .cp-cod-mas {
+        position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+        font-family: var(--f-data, monospace); font-style: normal; font-size: 9px;
+        letter-spacing: .1em; color: #7d8ea1; border: 1px solid rgba(148,176,208,.28);
+        border-radius: 999px; padding: 4px 8px; transition: color .18s, border-color .18s;
+      }
+      details.cp-cod[open] > summary .cp-cod-mas { color: var(--a-cyan, #4fd0e0);
+        border-color: rgba(79,208,224,.5); }
+      details.cp-cod[open] > summary .cp-cod-mas::after { content: ' ▴'; }
+      details.cp-cod:not([open]) > summary .cp-cod-mas::after { content: ' ▾'; }
+      details.cp-cod > p { padding: 0 13px 11px; margin: 0;
+        border-top: 1px dashed rgba(148,176,208,.16); padding-top: 9px; }
       .cp-cod.bloq { opacity: .42; }
       .cp-cod.bloq b { color: #6b7b8d; letter-spacing: .3em; }
+      /* Lo que falta, en una línea: cuenta y promesa, sin ocupar media pantalla. */
+      .cp-cod-pend { margin-top: 12px; padding: 9px 12px; border-radius: 8px; font-size: 11.5px;
+        line-height: 1.5; color: #8b9bad; background: rgba(20,28,40,.5);
+        border: 1px dashed rgba(148,176,208,.22); }
+      .cp-cod-pend b { color: var(--a-amber, #e0952a); }
+      .cp-cod-pend--full { color: #86e4b0; border-color: rgba(63,196,127,.4); }
 
       /* ── Briefing / cierre ───────────────────────────────────────────── */
       .cp-brief { font-size: 14.5px; line-height: 1.65; color: #c3cfdc; margin: 0 0 14px; }
-      .cp-controles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 7px; margin-bottom: 12px; }
-      .cp-controles div { display: flex; align-items: baseline; gap: 8px; padding: 7px 11px;
-        border-radius: 7px; background: rgba(20,28,40,.55); }
-      .cp-controles b { font-family: var(--f-data, monospace); font-size: 10.5px; letter-spacing: .1em;
-        color: var(--a-amber, #e0952a); white-space: nowrap; }
-      .cp-controles span { font-size: 11.5px; color: #a9b8c8; }
+      /* minmax(min(Npx, 100%), 1fr) en vez de minmax(Npx, 1fr): sin ese min(),
+         cuando la columna disponible baja del minimo la pista NO se encoge y la
+         rejilla desborda la tarjeta. Es lo que pasaba con estas cinco rejillas
+         en un telefono. */
       .cp-regla { font-size: 12.5px; line-height: 1.6; color: #9aabbe; padding: 10px 13px;
         border-left: 3px solid var(--a-cyan, #4fd0e0); background: rgba(79,208,224,.07); border-radius: 0 7px 7px 0; }
       .cp-regla b { color: #8fe4f0; }
 
-      /* Los cuatro pasos del bucle, numerados. Un jugador nuevo necesita el
-         ORDEN de las acciones antes que la lista de teclas. */
-      .cp-comose { display: flex; flex-direction: column; gap: 7px; margin-bottom: 6px; }
-      .cp-paso { display: flex; gap: 11px; align-items: flex-start; padding: 9px 12px;
-        border-radius: 8px; background: rgba(20,28,40,.6); border-left: 3px solid var(--a-cyan, #4fd0e0); }
-      .cp-paso i { flex: 0 0 22px; height: 22px; border-radius: 50%; font-style: normal;
-        display: flex; align-items: center; justify-content: center;
-        background: var(--a-cyan, #4fd0e0); color: #08131a;
-        font-family: var(--f-display, sans-serif); font-size: 12px; font-weight: 700; }
-      .cp-paso b { display: block; font-size: 13px; color: #e8eef5; font-weight: 600; }
-      .cp-paso span { display: block; font-size: 12px; line-height: 1.5; color: #a3b2c2; margin-top: 1px; }
+      /* ── EL BRIEFING SE QUEDÓ EN DOS COSAS (2026-08-12) ──────────────────
+         Antes traía cuatro pasos numerados, cuatro fichas de herramienta con su
+         pista y cuatro filas de controles: 1163 caracteres, 83 s de lectura y
+         dos pantallas de scroll. Y en cuanto se cerraba, Justus explicaba LO
+         MISMO en seis tarjetas. Nadie lee dos veces el mismo tutorial: se salta
+         el primero que aparece, que casualmente era el que tenía los dibujos.
+         Ahora el briefing enseña UNA regla y EL CINTURÓN; el resto lo dice
+         Justus dentro del juego, señalando la cosa de la que habla. */
+      .cp-regla-corta { font-size: clamp(13px, 3.4vw, 16px); line-height: 1.5; color: #dbe5f0;
+        padding: 11px 14px; margin-bottom: 4px; border-radius: 8px;
+        background: rgba(79,208,224,.09); border-left: 3px solid var(--a-cyan, #4fd0e0); }
+      .cp-regla-corta b { color: #8fe4f0; }
 
-      /* Las cuatro herramientas con su familia. */
-      .cp-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
-      .cp-tool { padding: 9px 12px; border-radius: 8px; background: rgba(20,28,40,.6);
-        border-left: 3px solid var(--tono, #e0952a); }
-      .cp-tool-cab { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
-      .cp-tool-cab i { font-size: 18px; font-style: normal; color: var(--tono, #e0952a); }
-      .cp-tool-cab b { display: block; font-family: var(--f-data, monospace); font-size: 11.5px;
-        letter-spacing: .12em; color: var(--tono, #e0952a); }
-      .cp-tool-cab em { display: block; font-size: 10.5px; color: #8b9bad; font-style: italic; }
-      .cp-tool > span { font-size: 11.5px; line-height: 1.5; color: #a3b2c2; }
+      /* El cinturón, en tira: cuatro iconos con su familia debajo. Se lee de un
+         vistazo, que es justo lo que un briefing tiene que permitir. */
+      .cp-tools--tira { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+      .cp-tools--tira .cp-tool { padding: 9px 4px; border-radius: 10px; text-align: center;
+        background: rgba(20,28,40,.6); border: 1px solid rgba(148,176,208,.12);
+        border-top: 2px solid var(--tono, #e0952a); }
+      .cp-tools--tira .cp-tool i { display: block; font-size: 21px; font-style: normal; line-height: 1.2; }
+      .cp-tools--tira .cp-tool b { display: block; font-family: var(--f-data, monospace);
+        font-size: 9.5px; letter-spacing: .08em; color: var(--tono, #e0952a); margin-top: 3px; }
+      .cp-tools--tira .cp-tool em { display: block; font-size: 10.5px; font-style: italic; color: #a3b2c2; }
       .cp-ol-progreso { font-family: var(--f-data, monospace); font-size: 10px; letter-spacing: .24em;
         color: #7d8ea1; margin: 14px 0 12px; }
       .cp-empezar, .cp-cierre-acciones .g-btn { width: 100%; }
@@ -939,7 +1012,7 @@ export class HUDCentroPostal {
       .cp-res-fila.mal b { color: #ff8d80; }
 
       /* ── Mesa de peritaje ────────────────────────────────────────────── */
-      .cp-per-card { width: min(820px, 95vw); }
+      .cp-per-card { width: min(820px, 100%); }
       .cp-per-cab { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; }
       .cp-per-tag { font-family: var(--f-data, monospace); font-size: 10px; letter-spacing: .26em; color: var(--a-amber, #e0952a); }
       .cp-per-card h2 { font-family: var(--f-display, sans-serif); font-size: clamp(20px, 3vw, 30px);
@@ -951,7 +1024,7 @@ export class HUDCentroPostal {
       .cp-per-mesa { margin: 16px 0 6px; padding: 14px; border-radius: 12px;
         background: linear-gradient(150deg, rgba(60,46,28,.5), rgba(24,20,14,.6));
         border: 1px solid rgba(190,150,90,.22); }
-      .cp-per-huecos { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+      .cp-per-huecos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 10px; }
       .cp-hueco { min-height: 78px; border-radius: 10px; padding: 9px 11px;
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center;
         border: 2px dashed rgba(190,150,90,.35); background: rgba(12,10,8,.4); color: #8a7a5e; }
@@ -967,7 +1040,7 @@ export class HUDCentroPostal {
       .cp-per-veredicto.aviso { background: rgba(224,149,42,.1); color: #f0c07a; border-left: 3px solid var(--a-amber, #e0952a); }
       .cp-per-tag2 { font-family: var(--f-data, monospace); font-size: 9.5px; letter-spacing: .22em;
         color: #7d8ea1; margin: 14px 0 8px; }
-      .cp-per-piezas { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+      .cp-per-piezas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 8px; }
       .cp-pieza { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 12px;
         border-radius: 9px; background: rgba(20,28,40,.7); color: #e8eef5;
         border: 1px solid rgba(148,176,208,.14); border-left: 3px solid var(--tono, #e0952a);
@@ -987,7 +1060,7 @@ export class HUDCentroPostal {
       .cp-per-que b { color: #f0c07a; }
 
       /* Checklist de requisitos, marcándose en vivo. */
-      .cp-per-check { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 8px; }
+      .cp-per-check { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(215px, 100%), 1fr)); gap: 8px; }
       .cp-req { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 8px;
         background: rgba(20,28,40,.55); border: 1px solid rgba(148,176,208,.12);
         transition: background .25s, border-color .25s; }
@@ -1015,7 +1088,7 @@ export class HUDCentroPostal {
       .cp-hueco.lleno em { font-style: italic; color: #a3b2c2; text-transform: none; letter-spacing: 0; }
 
       /* Hoja de resolución del acta: la consecuencia, explicada. */
-      .cp-fallo-card { width: min(640px, 94vw); }
+      .cp-fallo-card { width: min(640px, 100%); }
       .cp-fallo-card h2.ok { color: #86e4b0; }
       .cp-fallo-card h2.mal { color: #ff8d80; }
       .cp-res-motivo { font-size: 13px; line-height: 1.55; padding: 10px 13px; border-radius: 8px; margin-bottom: 4px; }
@@ -1069,6 +1142,33 @@ export class HUDCentroPostal {
       @S .cp-brief { font-size: 12.5px; }
       @S .cp-hueco { min-height: 64px; }
       @S .cp-per-regla { font-size: 10.5px; }
+
+      /* ── Hojas y modales en pantalla pequeña ──────────────────────────
+         Medido en un teléfono apaisado (667x375): la mesa de peritaje tenía
+         726 px de contenido dentro de 344 px visibles, y los dos botones que
+         cierran el tramite —FIRMAR ACTA y SEGUIR SIN ACTA— vivian al final de
+         ese scroll. El jugador firmaba a ciegas o no firmaba. La hoja pasa a
+         ocupar el hueco entero y sus acciones se anclan al pie. */
+      @S .cp-panel, @S .cp-peritaje, @S .cp-velo, @S .cp-fallo { padding: 8px; }
+      @S .cp-panel-card, @S .cp-per-card, @S .cp-velo-card, @S .cp-fallo-card {
+        width: 100%; max-width: 100%; padding: 12px 12px 0; }
+      @S .cp-per-acciones, @S .cp-cierre-acciones, @S .cp-empezar, @S .cp-fallo-ok {
+        position: sticky; bottom: 0; z-index: 3; margin-top: 12px; padding-bottom: 12px;
+        background: linear-gradient(transparent, rgba(10,15,22,.99) 46%); }
+      @S .cp-per-acciones, @S .cp-cierre-acciones { padding-top: 16px; gap: 8px; }
+      @S .cp-per-acciones .g-btn, @S .cp-cierre-acciones .g-btn { flex: 1 1 140px; }
+
+      /* Tipografia fluida: el texto de las hojas escala con el ancho real en
+         vez de saltar entre dos tamanos fijos. */
+      @S #cp-hud .g-title, @S .cp-per-card h2 { font-size: clamp(15px, 4.2vw, 22px); }
+      @S .cp-per-que { font-size: clamp(11px, 3vw, 13px); padding: 9px 11px; }
+      @S .cp-p-tag2 { margin: 12px 0 6px; }
+      @S .cp-pieza b { font-size: clamp(10.5px, 2.8vw, 12px); }
+      @S .cp-req span, @S .cp-tool > span, @S .cp-paso span { font-size: clamp(10px, 2.6vw, 12px); }
+      @S .cp-cod p, @S .cp-hilo span, @S .cp-nota { font-size: clamp(10.5px, 2.8vw, 12.5px); }
+
+      /* Objetivos tactiles: la columna de accesos sube de 44 a 48 px. */
+      @S .cp-acc { width: 48px; height: 48px; }
     `);
     document.head.appendChild(s);
   }

@@ -81,6 +81,7 @@ export class SalaLlegadas {
   /** Construye a las personas del operativo. */
   montar(sala) {
     this.limpiar();
+    this._observados = new Set();
     const n = sala.gente.length;
     sala.gente.forEach((datos, i) => {
       const p = this.#persona(datos);
@@ -239,14 +240,45 @@ export class SalaLlegadas {
     return hits.length ? hits[0].object.userData.personaId : null;
   }
 
-  resaltar(id) {
+  /**
+   * Gobierna los aros del suelo: quién está elegido, a quién ya miraste y a
+   * quién te falta.
+   *
+   * El aro de «pendiente» existe por un fallo encontrado jugando: en la sala de
+   * llegadas NADA indicaba que las personas fueran tocables. La instrucción
+   * vivía en el rótulo y en el tutorial, pero un jugador que salta el tutorial
+   * solo veía un grupo de muñecos quietos y dos botones que decían «cambiar
+   * cámara» y «dejar pasar a todos» — y despachaba el acto sin jugarlo. Un aro
+   * que respira bajo los pies dice «tócame» sin gastar una palabra, y al
+   * apagarse cuando ya los miraste hace de lista de tareas: se ve de un vistazo
+   * a cuántos te falta observar.
+   *
+   * @param {object} estado { seleccion, observados:Set }
+   */
+  pintarAros({ seleccion = null, observados = new Set() } = {}) {
     for (const p of this.personas) {
-      gsap.to(p.aro.material, { opacity: p.id === id ? 0.9 : 0, duration: 0.22, overwrite: 'auto' });
+      gsap.killTweensOf(p.aro.material);
+      if (p.id === seleccion) {
+        gsap.to(p.aro.material, { opacity: 0.9, duration: 0.22, overwrite: 'auto' });
+      } else if (observados.has(p.id)) {
+        gsap.to(p.aro.material, { opacity: 0, duration: 0.28, overwrite: 'auto' });
+      } else {
+        // Late. Y cada uno con su desfase, para que respiren como un grupo de
+        // personas y no como una fila de luces de navidad.
+        gsap.fromTo(p.aro.material, { opacity: 0.08 },
+          { opacity: 0.4, duration: 1.15, ease: 'sine.inOut', repeat: -1, yoyo: true,
+            delay: (p.id.charCodeAt(p.id.length - 1) % 5) * 0.16, overwrite: 'auto' });
+      }
     }
   }
 
-  apagarResaltes() {
-    for (const p of this.personas) gsap.to(p.aro.material, { opacity: 0, duration: 0.22, overwrite: 'auto' });
+  resaltar(id) { this.pintarAros({ seleccion: id, observados: this._observados }); }
+
+  apagarResaltes() { this.pintarAros({ seleccion: null, observados: this._observados }); }
+
+  /** Lo que el acto ya miró; lo guarda la sala para no pedirlo en cada llamada. */
+  setObservados(set) {
+    this._observados = set;
   }
 
   marcarDerivado(id) {

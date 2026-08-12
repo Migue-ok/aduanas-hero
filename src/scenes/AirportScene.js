@@ -149,27 +149,51 @@ engine.add({
  * (y, si aparece sustancia, la sala de DIRANDRO). El nivel dejó de ser un
  * mostrador para pasar a ser un recorrido por el control entero.
  */
+/**
+ * EL PERFILAMIENTO NO ABRE TODOS LOS TURNOS (playtest 2026-08-12).
+ *
+ * El Backlog ya dejaba escrita esta salida —«mover el acto 1 a uno de cada dos
+ * turnos si en pruebas con adolescentes se hace largo»— y la prueba dice que sí
+ * se hace largo. Jugando el nivel de principio a fin hay que atravesar NUEVE
+ * pantallas antes del primer interrogatorio: sala de llegadas, ficha, acta de
+ * derivación, canal rojo, a veces DIRANDRO y por fin el briefing del turno. Para
+ * un juego que se presenta con «todos te mienten», tardar tanto en sentar a
+ * alguien enfrente es el problema de ritmo más caro que tiene.
+ *
+ * En turnos impares se entra por el mirador (el turno 1 SIEMPRE, que es donde se
+ * enseña); en los pares se entra directo al mostrador. El acto no desaparece: se
+ * alterna, y de paso deja de ser rutina — cuando toca, se nota.
+ */
+const PERFILAMIENTO_CADA = 2;
+
 function beginTurn() {
   puntaje.reiniciarTurno(); // el marcador es del TURNO; el récord sobrevive aparte
-  iniciarPerfilamiento();
+  if (turn.turnoN % PERFILAMIENTO_CADA === 1) iniciarPerfilamiento();
+  else arrancarPuesto();
 }
 
 /** Qué esconde el equipaje de alguien derivado desde el perfilamiento. */
 const TIPOS_PERFILADO = ['dinero', 'mercancia', 'fauna', 'patrimonio', 'sustancia'];
 
-/** Justus explica el perfilamiento. Cuatro frases y la regla que no se negocia. */
+/**
+ * Justus explica el perfilamiento. Tres frases, ninguna de más de 100 caracteres.
+ *
+ * Antes eran cuatro de ~180 (729 caracteres, casi un minuto de lectura seguida)
+ * y empezaban con «el mirador», «el canal rojo» y «una derivación»: tres
+ * palabras que un jugador nuevo no conoce, en la primera frase del juego. Se
+ * dicen ahora en el idioma en que se piensa la acción — mirar, elegir, marcar —
+ * y la jerga la aprende cuando la ve escrita en su propia acta.
+ */
 const PASOS_JUSTUS_PERFILAMIENTO = [
   {
-    txt: '¡Jefe! Antes del mostrador, el mirador. Desde aquí se ve la sala entera y hay que elegir a quién bajamos al canal rojo. Una sola derivación, así que vamos a hacerla bien.',
+    // No repite la orden que ya está en la cabecera del acto: la completa.
+    txt: '¡Jefe! Soy Justus. Aquí se mira a todos antes de decidir.',
   },
   {
-    txt: 'Toque a cualquiera para observarlo. Su ficha NO trae foto ni pinta ni de dónde es: trae lo que la persona ESTÁ HACIENDO. Es lo único que después se puede escribir en un acta.',
+    txt: 'Su ficha no trae ni foto ni pinta: solo lo que la persona ESTÁ HACIENDO.',
   },
   {
-    txt: 'Y ojo con lo obvio: el que suda, el que corre, la señora agobiada con el crío. Casi siempre es gente honesta pasándolo mal. Lo que buscamos es a quien EVITA el control, no a quien lo sufre.',
-  },
-  {
-    txt: 'Última cosa, y es la importante. Si al firmar el acta pone «por su color», «por cómo viste» o «por su país», el supervisor se la devuelve y yo dejo de saludarlo. Aquí se marca por conducta. Punto.',
+    txt: 'Buscamos a quien EVITA el control, no al que suda o corre. Y se marca por conducta: por el color o el país, jamás.',
     foco: '.pf-cab',
   },
 ];
@@ -192,7 +216,10 @@ function iniciarPerfilamiento() {
   // porque viniendo de él la regla antisesgo no suena a cartel institucional:
   // suena a un veterano diciéndote cómo se hace el trabajo.
   if (turn.turnoN === 1) {
-    setTimeout(() => coach.guiar('perfilamiento', PASOS_JUSTUS_PERFILAMIENTO), 2400);
+    // 1,2 s, no 2,4: el jugador acaba de entrar a una sala llena de gente y lo
+    // primero que quiere saber es qué se toca. Dos segundos y medio mirando sin
+    // que pase nada es exactamente el hueco por el que se abandona una partida.
+    setTimeout(() => coach.guiar('perfilamiento', PASOS_JUSTUS_PERFILAMIENTO), 1200);
   } else {
     coach.setPata(true);
   }
@@ -226,8 +253,8 @@ function arrancarPuesto() {
   npcs.setVisible(true);
   audio.setFocus('mundo');
   tensionExtra = 0;
-  cine.goTo(Vista.PUESTO, { duration: 1.6 });
-  setTimeout(() => turn.iniciarTurno(), 900);
+  cine.goTo(Vista.PUESTO, { duration: 1.1 });
+  setTimeout(() => turn.iniciarTurno(), 600);
 }
 
 bus.on(Señal.TURNO_INICIADO, ({ turno, briefing }) => {
@@ -264,7 +291,7 @@ function presentNext() {
   const esteActor = actor;
   setTimeout(() => {
     if (actor === esteActor) actor.entregarPasaporte(() => desk.tossPassport());
-  }, 2700);
+  }, 1700);
   if (caso.esTrama) tensionExtra = 0.22; // el clímax se siente antes de saberse
 
   cine.goTo(Vista.PUESTO);
@@ -276,44 +303,52 @@ function presentNext() {
   hud.showFicha(caso);
   showMainDock();
 
-  setTimeout(() => { if (turn.caso === caso) decir(caso.perfil.nombre, caso.dialogos.saludo); }, 2600);
+  // El pasajero saluda casi al llegar. Antes tardaba 2,6 s en abrir la boca y
+  // el jugador se quedaba mirando a un muñeco callado con el dock ya puesto.
+  setTimeout(() => { if (turn.caso === caso) decir(caso.perfil.nombre, caso.dialogos.saludo); }, 1400);
 
   // Justus da la bienvenida al puesto en el primer pasajero de la carrera.
   // Espera a que el saludo del pasajero termine: dos voces a la vez no se
-  // entiende ninguna.
+  // entiende ninguna. Con el saludo adelantado a 1,4 s, 3,2 basta — y son tres
+  // segundos en los que el dock ya está vivo y se puede tocar, no de bloqueo.
   if (turn.turnoN === 1 && turn.indice === 0) {
-    setTimeout(() => { if (turn.caso === caso) coach.guiar('aeropuerto', PASOS_JUSTUS_AEROPUERTO); }, 6200);
+    setTimeout(() => { if (turn.caso === caso) coach.guiar('aeropuerto', PASOS_JUSTUS_AEROPUERTO); }, 3200);
   } else {
     coach.setPata(true);
   }
 }
 
 /**
- * La clase magistral del K-9 veterano. Cinco frases, una por herramienta, cada
- * una iluminando el botón del que habla. Tono: gruñón pero de tu lado.
+ * El K-9 presenta el puesto: una frase por herramienta, iluminando su botón.
+ *
+ * Antes eran seis párrafos de ~160 caracteres (983 en total, 70 s de lectura
+ * seguida) con la presentación del perro incluida. Un jugador que acaba de ver
+ * aparecer cinco botones no quiere la biografía de nadie: quiere saber para qué
+ * sirve cada uno. Como cada paso SEÑALA su botón, el texto solo tiene que
+ * completar lo que el dedo ya está mirando.
  */
 const PASOS_JUSTUS_AEROPUERTO = [
   {
-    txt: '¡Jefe! Bienvenido al turno noche. Yo soy Justus, doce años en esta puerta. Le enseño el puesto en treinta segundos y no volvemos a hablar de esto.',
+    txt: 'Soy Justus, jefe. Doce años en esta puerta. Le presento el puesto.',
   },
   {
-    txt: 'Primero, MIRE a la persona. Lea su ficha y compare lo que dice con lo que hace su cuerpo. Con INTERROGAR se sienta frente a él: sus ojos, sus manos y su garganta son botones — tóquelos cuando reaccionen.',
+    txt: 'INTERROGAR: siéntese enfrente. Sus ojos, sus manos y su garganta son botones.',
     foco: '#dock button[data-tool="interrogar"]',
   },
   {
-    txt: 'En DOCUMENTOS se arrastran las hojas del pasaporte. Los sellos no mienten: una ruta que no cuadra con la historia vale más que cualquier confesión.',
+    txt: 'DOCUMENTOS: arrastre las hojas. Los sellos no mienten.',
     foco: '#dock button[data-tool="documentos"]',
   },
   {
-    txt: 'Si algo le huele mal, RAYOS X. Cambie el contraste para separar lo orgánico de lo inorgánico y toque la silueta rara para anotarla en el expediente.',
+    txt: 'RAYOS X: cambie el contraste y toque la silueta rara.',
     foco: '#dock button[data-tool="xray"]',
   },
   {
-    txt: '¿Y si prefiere una segunda opinión? Llámeme. Yo olfateo el equipaje y si marco, me SIENTO y no me muevo. Cuando me siento, jefe, no me equivoco.',
+    txt: 'Y si duda, llámeme. Cuando me siento junto a una maleta, no me equivoco.',
     foco: '#dock button[data-tool="justus"]',
   },
   {
-    txt: 'Al final, DECIDIR: pase, cobro, retenido o derivado. El sello es irreversible y su reputación lo recuerda todo. Sin señales en el expediente es una corazonada… y las corazonadas se pagan. Suerte.',
+    txt: 'DECIDIR sella, y el sello no se deshace. Sin señales anotadas es una corazonada… y se pagan.',
     foco: '#dock button[data-tool="decidir"]',
   },
 ];

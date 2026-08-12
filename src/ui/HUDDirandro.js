@@ -432,7 +432,7 @@ export class HUDDirandro {
       .dr-z-real { font-family: var(--f-data,monospace); font-size: 11px; color: #6a7787; }
       .dr-z-real.ok { color: #6de0a4; }
       .dr-z-real.alto { color: #ff7d70; font-weight: 700; }
-      .dr-zona button { min-height: 38px; padding: 6px 10px; cursor: pointer;
+      .dr-zona button { min-height: 44px; padding: 8px 10px; cursor: pointer;
         font-family: var(--f-display,sans-serif); font-size: 10px; letter-spacing: .08em;
         color: var(--t-hi,#f2f6fa); background: rgba(20,28,40,.9);
         border: 1px solid rgba(148,176,208,.28); border-radius: 5px; }
@@ -443,7 +443,7 @@ export class HUDDirandro {
         margin-bottom: 10px; }
 
       /* Salida de estación: siempre presente, discreta */
-      .dr-saltar { display: block; width: 100%; min-height: 40px; margin-top: 10px; cursor: pointer;
+      .dr-saltar { display: block; width: 100%; min-height: 44px; margin-top: 10px; cursor: pointer;
         font-family: var(--f-data,monospace); font-size: 10px; letter-spacing: .1em;
         color: #8fa0b4; background: transparent;
         border: 1px dashed rgba(148,176,208,.28); border-radius: 5px; }
@@ -477,7 +477,7 @@ export class HUDDirandro {
       @S .dr-estacion h4 { font-size: 10.5px; }
       @S .dr-nota { font-size: 10px; }
       @S .dr-scan-caja { height: 170px; width: 90px; }
-      @S .dr-punto { font-size: 9.5px; padding: 6px 7px; min-height: 40px; }
+      @S .dr-punto { font-size: 9.5px; padding: 7px; min-height: 44px; }
       @S .dr-puntos { grid-template-columns: 1fr; }
       @S .dr-esp-lectura { font-size: 10px; }
       @S .dr-zona { padding: 6px 8px; }

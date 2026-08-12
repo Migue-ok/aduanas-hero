@@ -67,15 +67,23 @@ export class Perfilamiento {
     this.cine.enfocar(v.pos, v.look, { ...v, duration: 1.8, vista: 'perfilamiento' });
     this.audio.setFocus('mundo');
 
-    this.ui.setBrief(
-      'Grupo de llegadas en tránsito al semáforo aduanero. Observa cómo se comportan y decide '
-      + 'a quién derivar. Tienes UNA derivación, y hay que justificarla por escrito.');
+    // LA ORDEN, no el contexto. Antes esta cabecera traía tres líneas —«grupo de
+    // llegadas en tránsito al semáforo aduanero»— y la única indicación de qué
+    // hacer vivía en un toast de cinco segundos y en el tutorial. Quien saltaba
+    // el tutorial se quedaba mirando una sala llena de gente con dos botones que
+    // decían «cambiar cámara» y «pasar de todos»: la acción central del acto no
+    // aparecía por ninguna parte y se despachaba el acto entero sin jugarlo.
+    // Ahora la cabecera dice lo que hay que hacer, y se queda ahí mientras dure.
+    this.ui.setBrief('Toca a una persona para observarla.');
     this.ui.setContador(0, this.sala.gente.length);
+    // Y el rótulo se dice también SIN palabras: un aro que respira bajo los pies
+    // de cada persona a la que aún no has mirado. Es la parte de la instrucción
+    // que sobrevive a que alguien salte el tutorial.
+    mundo.setObservados(this.observados);
+    mundo.pintarAros({ observados: this.observados });
     this.#dock();
 
     this.canvas.addEventListener('pointerdown', this.onPointer);
-    this.hudPrincipal?.toast('Toca a una persona para observarla. Mira lo que HACE, no cómo se ve.',
-      { dur: 5200 });
     bus.emit(Señal.HERRAMIENTA_USADA, { zona: 'perfilamiento' });
   }
 
@@ -122,6 +130,11 @@ export class Perfilamiento {
     if (!this.observados.has(id)) {
       this.observados.add(id);
       this.ui.setContador(this.observados.size, this.sala.gente.length);
+      // La cabecera acompaña: en cuanto ya sabe tocar, deja de decírselo y pasa
+      // a la siguiente decisión. Un rótulo que repite lo que ya hiciste es ruido.
+      if (this.observados.size === 1) {
+        this.ui.setBrief('Mira lo que HACE, no cómo se ve. Solo puedes marcar a uno.');
+      }
       // Observar suma poco pero suma: el hábito de mirar a TODOS antes de
       // decidir es, literalmente, la vacuna contra el sesgo.
       puntaje.sumar(50, 'OBSERVACIÓN REGISTRADA', { neutro: true, detalle: p.conducta.corto });

@@ -207,7 +207,10 @@
 /* — Botones: un solo lenguaje táctico en todo el juego —
    `#interrogatorio` y `.doc` se excluyen: sus botones son tinta sobre su propia
    tarjeta y heredar el cristal oscuro los volvía ilegibles. */
-.dock button, .panel:not(#interrogatorio) button, #btn-start, .sheet button,
+/* `#btn-start` YA NO entra aquí: desde el rediseño de la portada es un botón
+   sólido ámbar sobre una ilustración, y este cristal oscuro con `!important` lo
+   dejaba gris sobre un fondo oscuro — la única acción de la pantalla, apagada. */
+.dock button, .panel:not(#interrogatorio) button, .sheet button,
 #port-hud .ph-start-btn, #port-hud .ph-exit, #port-hud .ph-summary-card button,
 #raid-hud .rh-start-btn, #raid-hud .rh-exit, #raid-hud .rh-final-card button,
 #consecuencia .continuar {
@@ -218,7 +221,7 @@
   border: 1px solid var(--g-border) !important; border-radius: var(--r-sm);
   transition: border-color .18s, color .18s, transform .09s, box-shadow .18s;
 }
-.dock button:hover, .panel:not(#interrogatorio) button:hover, #btn-start:hover, .sheet button:hover,
+.dock button:hover, .panel:not(#interrogatorio) button:hover, .sheet button:hover,
 #port-hud .ph-start-btn:hover, #raid-hud .rh-start-btn:hover, #consecuencia .continuar:hover {
   border-color: var(--g-border-hot) !important; color: #fff !important;
   box-shadow: 0 0 0 1px var(--g-border-hot), 0 10px 30px rgba(224,149,42,.16);
@@ -298,7 +301,7 @@ body.qa-tactil .sheet button { min-height: 52px; }
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
 }
 #level-menu .lm-card-name { font-family: var(--f-display); }
-#level-menu .lm-card-desc, .title-sub, #level-menu .lm-sub { font-family: var(--f-body); }
+#level-menu .lm-card-verbo, .title-sub, #level-menu .lm-sub { font-family: var(--f-body); }
 
 /* — Cronómetro y medidor: datos con presencia — */
 #raid-hud .rh-timer { font-family: var(--f-display); text-shadow: 0 0 26px rgba(255,90,74,.55); }

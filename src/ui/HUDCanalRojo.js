@@ -271,7 +271,7 @@ export class HUDCanalRojo {
       .cr-cod { font-family: var(--f-data, monospace); font-size: 10px; color: var(--a-amber,#e0952a); }
       .cr-medidas { font-family: var(--f-data, monospace); font-size: 10.5px; color: #8fa0b4; margin: 4px 0 10px; }
       .cr-pesar, .cr-abrir {
-        width: 100%; min-height: 42px; cursor: pointer; margin-bottom: 10px;
+        width: 100%; min-height: 44px; cursor: pointer; margin-bottom: 10px;
         background: rgba(20,28,40,.9); color: var(--t-hi,#f2f6fa);
         border: 1px solid rgba(148,176,208,.28); border-radius: 6px;
         font-family: var(--f-display, sans-serif); font-size: 12.5px; letter-spacing: .1em;
@@ -290,7 +290,7 @@ export class HUDCanalRojo {
         color: #7e8ea1; margin-bottom: 6px; }
       .cr-indicios { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
       .cr-ind { display: flex; align-items: flex-start; gap: 8px; text-align: left; cursor: pointer;
-        padding: 8px 10px; min-height: 40px;
+        padding: 8px 10px; min-height: 44px;
         background: rgba(255,255,255,.03); border: 1px dashed rgba(148,176,208,.3);
         border-radius: 5px; color: var(--t-mid,#c3cfdc); font-size: 11.5px; line-height: 1.4;
         font-family: inherit; }
@@ -352,12 +352,14 @@ export class HUDCanalRojo {
       @S .cr-ficha h4 { font-size: 12px; }
       @S .cr-medidas { font-size: 9px; }
       @S .cr-cod { font-size: 9px; }
-      @S .cr-ind { font-size: 10px; padding: 7px 8px; min-height: 36px; }
+      /* Ningun objetivo tactil baja de 44 px. Los indicios son la accion que mas
+         se repite del acto (se anotan uno a uno) y estaban en 36. */
+      @S .cr-ind { font-size: 10px; padding: 8px; min-height: 44px; }
       @S .cr-peso b { font-size: 16px; }
-      @S .cr-pesar { font-size: 10.5px; min-height: 38px; }
-      @S .cr-abrir { font-size: 10.5px; min-height: 38px; }
+      @S .cr-pesar { font-size: 10.5px; min-height: 44px; }
+      @S .cr-abrir { font-size: 10.5px; min-height: 44px; }
       @S .cr-dock { bottom: 10px; gap: 6px; }
-      @S .cr-dock .g-btn { min-height: 42px; padding: 9px 13px; font-size: 10.5px; letter-spacing: .07em; }
+      @S .cr-dock .g-btn { min-height: 44px; padding: 10px 13px; font-size: 10.5px; letter-spacing: .07em; }
       @S .cr-conf-caja { padding: 16px 18px; }
       @S .cr-res-caja { padding: 16px 18px; }
       @S .cr-conf-txt { font-size: 11.5px; line-height: 1.55; }

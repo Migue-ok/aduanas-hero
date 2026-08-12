@@ -14,8 +14,8 @@ import { narrator } from '../audio/Narrator.js';
  * Decisiones de diseño:
  *  - Vive en `document.body`, no en `#hud-root`: los niveles vacían ese nodo al
  *    montarse y se llevarían al perro por delante.
- *  - No bloquea el juego. Sin scrim modal, sin pausa: es una tarjeta con la que
- *    puedes convivir. El tutorial que secuestra la pantalla se odia.
+ *  - No bloquea el juego. Sin scrim modal, sin pausa, y desde ADR-014 tampoco
+ *    roba el dedo: la tarjeta es `pointer-events: none` salvo sus controles.
  *  - Recuerda lo aprendido (`localStorage`). La segunda partida no repite la
  *    clase, pero la pata flotante la reabre cuando quieras.
  *  - Voz opcional a través del Narrator (respeta el mute global del jugador) y
@@ -23,11 +23,33 @@ import { narrator } from '../audio/Narrator.js';
  *  - Alto contraste desde el primer píxel (Fase 1): blanco puro y ámbar sobre
  *    azul noche casi opaco, objetivos táctiles de 52 px.
  *
+ * ── UN SOLO JUSTUS A LA VEZ (la cola) ──────────────────────────────────────
+ * Antes `guiar()` escribía directamente sobre el estado vivo (`this.pasos`,
+ * `this.i = 0`). Dos avisos que coincidían —y coincidían mucho: el N1 programa
+ * la clase del perfilamiento a los 2,4 s y la del puesto a los 6,2 s; el N4
+ * suelta un consejo por cada dominio nuevo que apuntas— producían esto:
+ *   · la lección a medias desaparecía sin marcarse como vista, así que volvía
+ *     a salir en la siguiente partida;
+ *   · su `alFinal` no llegaba nunca (en el N4 eso dejaba el tutorial colgado);
+ *   · dos voces del Narrator y dos ladridos pisándose.
+ * Ahora todo entra por una COLA con dos rangos: `leccion` (varios pasos, se
+ * respeta entera) y `susurro` (una frase, cinta fina que se va sola). Nada
+ * interrumpe a nada; entre dos intervenciones media un cooldown; los duplicados
+ * se descartan y la cola tiene tope, así que un nivel que dispare diez consejos
+ * seguidos no encadena diez tarjetas: se queda con las que caben.
+ *
  * API:
  *   coach.guiar('aeropuerto', [{ txt, foco?, voz? }, …], { forzar })
  *   coach.decir('chimbote:contenedor', 'Frase suelta')
  *   coach.ocultar() · coach.reiniciar(clave) · coach.destroy()
  */
+
+/** Respiro entre dos intervenciones: sin esto la cola se siente como spam. */
+const COOLDOWN_MS = 900;
+/** Tope de espera. Un consejo que lleva cuatro turnos en la cola ya no aplica. */
+const MAX_COLA = 3;
+/** Dos ladridos solapados suenan a bug; uno cada tanto suena a perro. */
+const LADRIDO_MS = 1600;
 
 const LS = 'ah_coach_';
 const visto = (clave) => {
@@ -82,8 +104,19 @@ const CSS = `
   border-radius: 4px 14px 14px 4px;
   box-shadow: 0 24px 60px rgba(0,0,0,.78), 0 0 0 1px rgba(245,181,68,.16), 0 0 44px rgba(245,181,68,.1);
   color: #ffffff; font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+  /* NO BLOQUEANTE (ADR-014). La tarjeta es un consejo, no un modal: los toques
+     la ATRAVIESAN y llegan al juego. Solo los controles de Justus —y el cuerpo
+     de texto cuando la lección tiene varios pasos y hace scroll— recuperan el
+     dedo. Antes cualquier píxel de la tarjeta se tragaba el toque, así que un
+     consejo plantado encima del dock dejaba el nivel injugable hasta cerrarlo. */
+  pointer-events: none;
 }
 #justus-coach.jc-on { display: flex; }
+#justus-coach button, #justus-coach .jc-cerrar { pointer-events: auto; }
+/* Y solo cuando la lección NO CABE y hay que arrastrarla, el cuerpo atrapa el
+   dedo. Si cabe entera —el caso normal— la tarjeta sigue siendo atravesable de
+   lado a lado y el dock de debajo se puede pulsar sin cerrar nada. */
+#justus-coach.jc-leccion.jc-scroll .jc-cuerpo { pointer-events: auto; }
 @supports not (backdrop-filter: blur(1px)) {
   #justus-coach { background: linear-gradient(158deg, #111b2a, #060a11); }
 }
@@ -149,7 +182,8 @@ const CSS = `
 #justus-coach .jc-punto.on { background: #f5b544; transform: scale(1.25); }
 #justus-coach .jc-acciones { display: flex; gap: 7px; }
 #justus-coach button {
-  min-height: 40px; padding: 10px 18px; cursor: pointer;
+  /* 44 px es el mínimo táctil del proyecto (WCAG 2.5.5 / HIG). Estaba en 40. */
+  min-height: 44px; min-width: 44px; padding: 10px 18px; cursor: pointer;
   font-family: 'Bahnschrift', 'DIN Alternate', 'Segoe UI Semibold', system-ui, sans-serif;
   font-size: 12px; letter-spacing: 1.6px; font-weight: 700; text-transform: uppercase;
   color: #0e1319; background: linear-gradient(180deg, #ffca6a, #e8a032);
@@ -165,6 +199,42 @@ const CSS = `
 }
 #justus-coach button.jc-salta:hover { border-color: rgba(245,181,68,.7); color: #ffd280; }
 
+/* ── SUSURRO — el consejo suelto, en cinta fina y sin botones ─────────────
+   Una frase de aviso no merece la tarjeta entera con puntos de progreso y dos
+   botones que hay que pulsar: se lee y se va sola. Ocupa la mitad de alto, no
+   roba el dedo (la tarjeta entera ignora los punteros) y solo deja una ✕ de
+   44 px por si molesta. Es el modo por defecto de decir().
+   (Sin acentos graves aquí dentro: esto vive en un template literal.) */
+#justus-coach.jc-susurro {
+  width: 420px; padding: 9px 46px 9px 11px; gap: 10px;
+  align-items: center; border-left-width: 3px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.6), 0 0 0 1px rgba(245,181,68,.14);
+}
+#justus-coach.jc-susurro .jc-pie { display: none; }
+#justus-coach.jc-susurro .jc-avatar { width: 40px; height: 40px; border-width: 1px; }
+#justus-coach.jc-susurro .jc-dog { width: 34px; height: 34px; }
+#justus-coach.jc-susurro .jc-nombre { font-size: 9px; letter-spacing: 1.8px; margin-bottom: 2px; }
+#justus-coach.jc-susurro .jc-nombre i { display: none; }
+#justus-coach.jc-susurro .jc-txt { font-size: 13px; line-height: 1.42; min-height: 0; }
+
+/* ✕ del susurro: existe solo ahí, y con el hitbox táctil completo. */
+#justus-coach .jc-cerrar {
+  display: none; position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  width: 44px; height: 44px; padding: 0; min-width: 44px; min-height: 44px;
+  background: none; border: none; box-shadow: none; border-radius: 8px;
+  color: #9fb0c4; font-size: 15px; line-height: 1;
+}
+#justus-coach .jc-cerrar:hover { color: #ffd280; background: rgba(245,181,68,.12); filter: none; }
+#justus-coach.jc-susurro { position: fixed; }
+#justus-coach.jc-susurro .jc-cerrar { display: grid; place-items: center; }
+
+/* Barra de vida del susurro: se ve cuánto le queda antes de irse solo. */
+#justus-coach .jc-tiempo {
+  display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: rgba(245,181,68,.85); transform-origin: 0 50%; border-radius: 0 0 0 4px;
+}
+#justus-coach.jc-susurro .jc-tiempo { display: block; }
+
 /* ── Pata flotante: reabre la guía cuando el jugador se pierde ───────── */
 #jc-pata {
   position: fixed; z-index: 59; right: 14px; bottom: 14px;
@@ -176,6 +246,28 @@ const CSS = `
   transition: transform .18s, box-shadow .18s;
 }
 #jc-pata.jc-on { display: grid; }
+/* Con una hoja abierta la pata sobra, y encima estorba: vive en la esquina
+   inferior derecha, que es justo donde los modales ponen su boton de accion
+   (FIRMAR ACTA, VOLVER AL MENU). Se retira mientras haya algo que leer. */
+body:has(.cp-peritaje:not(.hidden)) #jc-pata,
+body:has(.cp-velo:not(.hidden)) #jc-pata,
+body:has(.cp-fallo:not(.hidden)) #jc-pata,
+body:has(.cp-panel:not(.hidden)) #jc-pata,
+body:has(#hoja.sheet:not(.oculto)) #jc-pata,
+/* Ni en la portada ni en el menu: son pantallas de entrada, no partida. La pata
+   se queda del nivel anterior y aparece flotando sobre el titulo. */
+body:has(#title-screen:not(.hidden)) #jc-pata,
+body:has(#level-menu:not(.hidden)) #jc-pata { display: none; }
+/* Y en tactil, tambien con una herramienta del puesto abierta: la pata vive en
+   la esquina inferior derecha y ahi es donde cae VOLVER AL PUESTO cuando la
+   libreta ocupa el ancho entero. Reaparece al cerrar la herramienta. */
+@media (pointer: coarse), (max-width: 768px) {
+  body:has(#interrogatorio:not(.oculto)) #jc-pata,
+  body:has(#documentos:not(.oculto)) #jc-pata,
+  body:has(#xray-controls:not(.oculto)) #jc-pata,
+  body:has(#decision:not(.oculto)) #jc-pata,
+  body:has(#corporal:not(.oculto)) #jc-pata { display: none; }
+}
 #jc-pata:hover { transform: scale(1.08); box-shadow: 0 12px 32px rgba(0,0,0,.7), 0 0 30px rgba(245,181,68,.35); }
 #jc-pata:active { transform: scale(.95); }
 
@@ -205,6 +297,15 @@ const CSS = `
   #justus-coach .jc-txt { font-size: 14px; line-height: 1.45; min-height: 2.8em; }
   #justus-coach button { min-height: 52px; padding: 13px 18px; font-size: 12px; }
   #jc-pata { width: 56px; height: 56px; bottom: 12px; right: 12px; }
+
+  /* El susurro en móvil es aún más fino: dos líneas como mucho, y encima del
+     mobiliario inferior (lo mide reposicionar). El dedo lo atraviesa. */
+  #justus-coach.jc-susurro {
+    width: min(94vw, 480px); max-width: 94vw; padding: 8px 46px 8px 9px; gap: 9px;
+  }
+  #justus-coach.jc-susurro .jc-avatar { width: 38px; height: 38px; }
+  #justus-coach.jc-susurro .jc-dog { width: 32px; height: 32px; }
+  #justus-coach.jc-susurro .jc-txt { font-size: 12.5px; line-height: 1.4; }
 }
 @media (max-width: 430px) {
   #justus-coach { width: 97vw; max-width: 97vw; padding: 11px; gap: 9px; }
@@ -240,6 +341,12 @@ class JustusCoach {
     this._autoTimer = null;
     this._foco = null;
     this._onFin = null;
+    /** Mensajes esperando turno. Ver la nota larga de la cabecera del módulo. */
+    this.cola = [];
+    this._enCooldown = false;
+    this._cooldownTimer = null;
+    this._susurroTimer = null;
+    this._ultimoLadrido = -1e9;
   }
 
   // ── Construcción perezosa: nada existe hasta que Justus habla ──────────
@@ -265,7 +372,9 @@ class JustusCoach {
             <button class="jc-next" type="button">SIGUIENTE</button>
           </div>
         </div>
-      </div>`;
+      </div>
+      <button class="jc-cerrar" type="button" aria-label="Cerrar el aviso de Justus">✕</button>
+      <i class="jc-tiempo"></i>`;
     document.body.appendChild(el);
     this.el = el;
 
@@ -273,9 +382,12 @@ class JustusCoach {
     this.$puntos = el.querySelector('.jc-puntos');
     this.$next = el.querySelector('.jc-next');
     this.$salta = el.querySelector('.jc-salta');
+    this.$cerrar = el.querySelector('.jc-cerrar');
+    this.$tiempo = el.querySelector('.jc-tiempo');
 
     this.$next.addEventListener('click', () => this.#avanzar());
     this.$salta.addEventListener('click', () => this.#terminar(true));
+    this.$cerrar.addEventListener('click', () => this.#terminar(false));
 
     const pata = document.createElement('button');
     pata.id = 'jc-pata';
@@ -294,23 +406,134 @@ class JustusCoach {
   }
 
   /**
-   * Lanza una secuencia guiada.
+   * Lanza una secuencia guiada. NO interrumpe: si Justus ya está hablando, el
+   * mensaje espera turno en la cola.
+   *
    * @param {string} clave        id de la lección (se recuerda en localStorage)
    * @param {Array}  pasos        [{ txt, foco?, voz?, dur? }]
-   * @param {object} opts         { forzar, alFinal }
+   * @param {object} opts         { forzar, alFinal, pos, susurro }
    */
-  guiar(clave, pasos, { forzar = false, alFinal = null, pos = 'abajo' } = {}) {
+  guiar(clave, pasos, opts = {}) {
     if (!pasos?.length) return;
-    this._pos = pos;
+    const { forzar = false } = opts;
     if (!forzar && visto(clave)) {
       // Ya lo sabe: solo dejamos la pata a mano por si se pierde.
       this.#asegurar();
-      this._ultima = { clave, pasos };
+      this._ultima = { clave, pasos, opts };
       this.pata.classList.add('jc-on');
       return;
     }
     this.#asegurar();
-    this._ultima = { clave, pasos };
+    this.#encolar({ clave, pasos, opts });
+  }
+
+  /**
+   * Mete un mensaje en la cola y trata de despacharla.
+   *
+   * Reglas, en este orden:
+   *  1. Nada de duplicados — ni contra lo que suena ahora ni contra lo que espera.
+   *  2. Tope de cola: si rebosa, cae el susurro más viejo (una lección con varios
+   *     pasos nunca se descarta: es contenido que el nivel considera obligatorio).
+   */
+  #encolar(msg) {
+    msg.susurro = msg.opts.susurro ?? msg.pasos.length === 1;
+    if (this.clave === msg.clave && this.activo) return;
+    if (this.cola.some((m) => m.clave === msg.clave)) return;
+    this.cola.push(msg);
+    while (this.cola.length > MAX_COLA) {
+      const i = this.cola.findIndex((m) => m.susurro);
+      this.cola.splice(i >= 0 ? i : 0, 1);
+    }
+    this.#bombear();
+  }
+
+  /** Saca el siguiente mensaje si el canal está libre. Idempotente. */
+  #bombear() {
+    if (this.activo || this._enCooldown || !this.cola.length || !this.el) return;
+    if (this.#pantallaOcupada()) { this.#reintentar(); return; }
+    this.#abrir(this.cola.shift());
+  }
+
+  /**
+   * ¿Hay una herramienta o una hoja ocupando la pantalla?
+   *
+   * En un monitor caben Justus y la libreta del interrogatorio a la vez. En un
+   * teléfono apaisado —375 px de alto— no: la libreta ocupa el 68 % y la cinta
+   * de diálogo el hueco de arriba, así que el consejo aterrizaba justo encima de
+   * CONFRONTAR. La respuesta no es apretujarlo en un margen que no existe: es
+   * ESPERAR. El aviso no se pierde —sigue en la cola— y sale en cuanto el
+   * jugador cierra lo que tenía abierto, que además es cuando vuelve a tener
+   * atención para leerlo.
+   */
+  #pantallaOcupada() {
+    if (!matchMedia('(pointer: coarse), (max-width: 768px)').matches) return false;
+    const sel = '#interrogatorio:not(.oculto), #documentos:not(.oculto), '
+      + '#xray-controls:not(.oculto), #decision:not(.oculto), #corporal:not(.oculto), '
+      + '.sheet:not(.oculto), .cp-peritaje:not(.hidden), .cp-velo:not(.hidden), '
+      + '.cp-fallo:not(.hidden), .cp-panel:not(.hidden)';
+    return [...document.querySelectorAll(sel)].some((n) => n.offsetParent !== null);
+  }
+
+  /** Vuelve a intentarlo más tarde: la cola no se vacía sola. */
+  #reintentar() {
+    clearTimeout(this._reintento);
+    this._reintento = setTimeout(() => this.#bombear(), 1200);
+  }
+
+  /**
+   * Vigilancia mientras habla: la herramienta puede abrirse DESPUÉS.
+   *
+   * El caso real: Justus arranca su clase del puesto y el jugador —que no le
+   * está haciendo caso, cosa muy suya— pulsa INTERROGAR. La libreta se despliega
+   * y la tarjeta se queda debajo, sobre CONFRONTAR. Comprobarlo solo al sacar de
+   * la cola no basta, así que mientras hay tarjeta abierta se mira cada 600 ms.
+   */
+  #vigilar() {
+    clearInterval(this._vigia);
+    if (!matchMedia('(pointer: coarse), (max-width: 768px)').matches) return;
+    this._vigia = setInterval(() => {
+      if (!this.activo) { clearInterval(this._vigia); return; }
+      if (this.#pantallaOcupada()) this.#apartar();
+    }, 600);
+  }
+
+  /**
+   * Cede el paso sin perder el mensaje: la tarjeta se recoge y vuelve al frente
+   * de la cola. Sin marcar como vista — no se ha leído — así que reaparece
+   * entera en cuanto el jugador cierra lo que abrió.
+   */
+  #apartar() {
+    const pendiente = {
+      clave: this.clave,
+      pasos: this.pasos,
+      susurro: this._susurro,
+      opts: { ...(this._ultima?.opts ?? {}), forzar: true },
+    };
+    clearInterval(this._typeTimer); this._typeTimer = null;
+    clearTimeout(this._autoTimer);
+    clearTimeout(this._susurroTimer);
+    clearInterval(this._vigia);
+    this.#soltarFoco();
+    this.activo = false;
+    document.body.classList.remove('jc-guiando');
+    narrator.callar();
+    if (this.el) {
+      gsap.killTweensOf(this.el);
+      if (this.$tiempo) gsap.killTweensOf(this.$tiempo);
+      gsap.set(this.el, { clearProps: 'opacity,transform' });
+      this.el.classList.remove('jc-on', 'jc-habla', 'jc-susurro', 'jc-leccion', 'jc-scroll');
+    }
+    this.pata?.classList.add('jc-on');
+    this.cola.unshift(pendiente);
+    this.#reintentar();
+  }
+
+  /** Pinta y anima un mensaje que YA tiene el canal para él solo. */
+  #abrir({ clave, pasos, opts }) {
+    const { alFinal = null, pos = 'abajo', susurro = pasos.length === 1 } = opts;
+    this._pos = pos;
+    this._susurro = susurro;
+    this._ultima = { clave, pasos, opts };
     this._onFin = alFinal;
     this.clave = clave;
     this.pasos = pasos;
@@ -323,15 +546,39 @@ class JustusCoach {
 
     clearTimeout(this._cierreTimer); // si veníamos de un cierre, lo cancelamos
     this.el.classList.add('jc-on');
+    this.el.classList.toggle('jc-susurro', susurro);
+    this.el.classList.toggle('jc-leccion', !susurro);
     // Bandera global: los HUD de cada nivel apartan sus propias cintas mientras
-    // Justus ocupa el borde inferior (ver CSS del raid).
-    document.body.classList.add('jc-guiando');
+    // Justus ocupa el borde inferior (ver CSS del raid). Un susurro no la pone:
+    // es demasiado pequeño para justificar que el nivel reorganice su HUD.
+    document.body.classList.toggle('jc-guiando', !susurro);
     this.#reposicionar();
     gsap.fromTo(this.el,
-      { opacity: 0, y: pos === 'arriba' ? -26 : 28, scale: 0.9 },
-      { opacity: 1, y: 0, scale: 1, duration: 0.62, ease: 'back.out(1.7)', overwrite: true });
-    audio.ladridoFeliz();
+      { opacity: 0, y: pos === 'arriba' ? -26 : 28, scale: susurro ? 0.96 : 0.9 },
+      { opacity: 1, y: 0, scale: 1, duration: susurro ? 0.4 : 0.62, ease: 'back.out(1.7)', overwrite: true });
+    if (!susurro) this.#ladrar();
     this.#pintar();
+    this.#vigilar();
+  }
+
+  /** Un ladrido cada `LADRIDO_MS` como mucho: dos a la vez suenan a fallo. */
+  #ladrar() {
+    const ahora = performance.now();
+    if (ahora - this._ultimoLadrido < LADRIDO_MS) return;
+    this._ultimoLadrido = ahora;
+    audio.ladridoFeliz();
+  }
+
+  /**
+   * La voz de Justus, siempre en un solo canal: CALLA lo anterior antes de
+   * empezar. El Narrator ya cancela por dentro, pero solo si el motor reporta
+   * `speaking`, y con voces SAPI ese estado llega tarde — lo suficiente para que
+   * dos frases se solapen medio segundo. Cortar aquí, explícitamente, es lo que
+   * garantiza que nunca se oigan dos Justus a la vez.
+   */
+  #vozJustus(texto) {
+    narrator.callar();
+    narrator.decir('Justus', texto);
   }
 
   /**
@@ -346,22 +593,37 @@ class JustusCoach {
     const est = this.el.style;
     const compacto = matchMedia('(pointer: coarse), (max-width: 768px)').matches;
     if (!compacto) { est.top = ''; est.bottom = ''; est.maxHeight = ''; return; }
-    if (this._pos === 'arriba') {
+    // El susurro NUNCA va arriba: esa franja la ocupan los datos de turno de los
+    // cuatro niveles (barra superior, oleada, integridad, marcador). Abajo, en
+    // cambio, el centro queda libre en todos —el mando vive en las esquinas— y
+    // es donde el jugador ya está mirando el dock.
+    if (this._pos === 'arriba' && !this._susurro) {
       est.top = '52px'; est.bottom = 'auto';
       est.maxHeight = `${Math.max(120, window.innerHeight - 120)}px`;
       return;
     }
     est.top = '';
-    // Medimos TODO lo que vive pegado al borde inferior — el dock del aeropuerto
-    // y el mando virtual del muelle y el raid — y nos plantamos encima de lo más
-    // alto. Es una sola regla genérica: ninguna escena tiene que avisarnos de su
-    // mobiliario, y el consejo nunca tapa el control que está señalando.
+    // Medimos TODO lo que vive pegado al borde inferior y nos plantamos encima
+    // de lo más alto. Es una sola regla genérica: ninguna escena tiene que
+    // avisarnos de su mobiliario, y el consejo nunca tapa el control que está
+    // señalando.
+    //
+    // La lista incluye los cuatro docks del juego, no solo el del puesto. Con
+    // `#dock` a secas, Justus se plantaba encima de la barra de acciones del
+    // PERFILAMIENTO —que es un `.pf-dock`— y su clase magistral tapaba justo los
+    // dos botones de los que estaba hablando.
     let ocupado = 0;
-    for (const sel of ['#dock:not(.oculto)', '.tp-stick', '.tp-btn']) {
+    for (const sel of ['#dock:not(.oculto)', '.pf-dock', '.cr-dock', '.dr-dock',
+      '.cp-hotbar', '.tp-stick', '.tp-btn']) {
       for (const n of document.querySelectorAll(sel)) {
         if (n.offsetParent === null) continue;              // oculto: no estorba
         const r = n.getBoundingClientRect();
         if (r.height === 0) continue;
+        // Solo cuenta lo que de verdad está PEGADO al borde inferior. La hotbar
+        // del Centro Postal, por ejemplo, sube a la columna izquierda en táctil
+        // (el borde de abajo es del mando): medirla como mobiliario inferior
+        // daba 313 px de ocupación y mandaba la tarjeta al techo, cortada.
+        if (window.innerHeight - r.bottom > 24) continue;
         ocupado = Math.max(ocupado, window.innerHeight - r.top);
       }
     }
@@ -372,6 +634,14 @@ class JustusCoach {
     // el borde, se le pone techo y su cuerpo hace scroll (el pie queda pegado
     // abajo, así que ENTENDIDO siempre se alcanza).
     const libre = window.innerHeight - ocupado - 54;
+    // El susurro cabe siempre: dos líneas de texto y un avatar de 38 px. Se le
+    // pone techo bajo a propósito, para que ni con una frase larga crezca hasta
+    // convertirse en la tarjeta invasiva que vino a sustituir.
+    if (this._susurro) {
+      est.bottom = `${ocupado + 8}px`;
+      est.maxHeight = `${Math.max(56, Math.min(96, libre))}px`;
+      return;
+    }
     if (libre < 130) {
       // Ni con esas: nos pegamos al fondo y aceptamos solapar el mando, que es
       // menos grave que una tarjeta cortada por la mitad.
@@ -381,17 +651,33 @@ class JustusCoach {
       est.bottom = `${ocupado + 10}px`;
       est.maxHeight = `${libre}px`;
     }
+    this.#ajustarScroll();
   }
 
-  /** Un solo consejo, sin secuencia. Se recuerda igual. */
+  /**
+   * Marca si la tarjeta necesita arrastre. De eso depende que retenga el dedo o
+   * lo deje pasar al juego, así que se recalcula cada vez que cambia su
+   * contenido o su sitio (ver la regla `.jc-leccion.jc-scroll` del CSS).
+   */
+  #ajustarScroll() {
+    if (!this.el) return;
+    this.el.classList.toggle('jc-scroll', this.el.scrollHeight > this.el.clientHeight + 1);
+  }
+
+  /**
+   * Un solo consejo, sin secuencia: sale como SUSURRO (cinta fina, sin botones,
+   * se cierra sola). Es la vía por la que los niveles avisan de algo puntual,
+   * así que es justo la que no puede secuestrar la pantalla.
+   */
   decir(clave, txt, opts = {}) {
-    this.guiar(clave, [{ txt, ...opts }], opts);
+    this.guiar(clave, [{ txt, ...opts }], { susurro: true, ...opts });
   }
 
   /** Reabre la última lección aunque ya estuviera vista. */
   repetir() {
     if (!this._ultima) return;
-    this.guiar(this._ultima.clave, this._ultima.pasos, { forzar: true, alFinal: this._onFin });
+    const { clave, pasos, opts = {} } = this._ultima;
+    this.guiar(clave, pasos, { ...opts, forzar: true, alFinal: this._onFin });
   }
 
   #pintar() {
@@ -428,14 +714,32 @@ class JustusCoach {
         this._typeTimer = null; // sin esto, `#avanzar` cree que aún se escribe
         this.$txt.innerHTML = html;
         this.el.classList.remove('jc-habla');
+        this.#ajustarScroll(); // el texto ya está entero: ahora se sabe si cabe
+        if (this._susurro) this.#programarAutocierre(plano);
       }
     }, paso_ms);
 
-    if (paso.voz !== false) narrator.decir('Justus', plano);
+    if (paso.voz !== false) this.#vozJustus(plano);
 
     // Auto-avance opcional: para pasos que acompañan una animación del mundo.
     clearTimeout(this._autoTimer);
     if (paso.dur) this._autoTimer = setTimeout(() => this.#avanzar(), paso.dur * 1000);
+  }
+
+  /**
+   * El susurro se va solo: tiempo de lectura real (~14 caracteres por segundo,
+   * el ritmo de lectura en pantalla pequeña) con suelo de 3,6 s y techo de 9 s.
+   * La barrita del borde inferior lo enseña, para que la desaparición no
+   * sorprenda a nadie a mitad de frase.
+   */
+  #programarAutocierre(plano) {
+    const ms = Math.min(9000, Math.max(3600, plano.length * 72));
+    clearTimeout(this._susurroTimer);
+    this._susurroTimer = setTimeout(() => this.#terminar(false), ms);
+    if (this.$tiempo) {
+      gsap.fromTo(this.$tiempo, { scaleX: 1 },
+        { scaleX: 0, duration: ms / 1000, ease: 'none', overwrite: true });
+    }
   }
 
   #avanzar() {
@@ -445,6 +749,7 @@ class JustusCoach {
       this._typeTimer = null;
       this.$txt.innerHTML = this.pasos[this.i].txt;
       this.el.classList.remove('jc-habla');
+      this.#ajustarScroll();
       return;
     }
     this.i += 1;
@@ -456,12 +761,18 @@ class JustusCoach {
   #terminar(saltado) {
     clearInterval(this._typeTimer);
     clearTimeout(this._autoTimer);
+    clearTimeout(this._susurroTimer);
+    clearInterval(this._vigia);
+    if (this.$tiempo) gsap.killTweensOf(this.$tiempo);
     this.#soltarFoco();
     this.activo = false;
     document.body.classList.remove('jc-guiando');
     if (this.clave) marcarVisto(this.clave);
-    if (!saltado) audio.ladridoFeliz();
+    // El ladrido de despedida es de las lecciones. Un susurro que se cierra solo
+    // no puede ladrar: es exactamente el ruido que sobra durante el juego.
+    if (!saltado && !this._susurro) this.#ladrar();
     narrator.callar();
+    this.#programarSiguiente();
     // La salida se anima, pero el ESTADO no puede depender de que la animación
     // termine: con la pestaña en segundo plano el navegador estrangula el rAF,
     // GSAP deja de avanzar y su `onComplete` no llega nunca — la tarjeta se
@@ -480,10 +791,24 @@ class JustusCoach {
   #cerrarTarjeta() {
     if (!this.el || !this.el.classList.contains('jc-on')) return;
     clearTimeout(this._cierreTimer);
-    this.el.classList.remove('jc-on', 'jc-habla');
+    this.el.classList.remove('jc-on', 'jc-habla', 'jc-susurro', 'jc-leccion');
     gsap.killTweensOf(this.el);
     gsap.set(this.el, { clearProps: 'opacity,transform' });
     this.pata?.classList.add('jc-on');
+  }
+
+  /**
+   * Cooldown y siguiente. El respiro no es cosmético: sin él, dos avisos
+   * encolados se ven como un solo parpadeo y el jugador ni registra que han
+   * sido dos cosas distintas.
+   */
+  #programarSiguiente() {
+    this._enCooldown = true;
+    clearTimeout(this._cooldownTimer);
+    this._cooldownTimer = setTimeout(() => {
+      this._enCooldown = false;
+      this.#bombear();
+    }, COOLDOWN_MS);
   }
 
   #soltarFoco() {
@@ -491,20 +816,40 @@ class JustusCoach {
     this._foco = null;
   }
 
-  /** Cierre inmediato sin marcar como visto (cambio de contexto brusco). */
+  /**
+   * Cierre inmediato sin marcar como visto (cambio de contexto brusco).
+   * Vacía también la cola: si el nivel cambia de acto, los consejos del acto
+   * anterior ya no aplican y aparecerían fuera de contexto.
+   */
   ocultar() {
     clearInterval(this._typeTimer);
     this._typeTimer = null;
     clearTimeout(this._autoTimer);
     clearTimeout(this._cierreTimer);
+    clearTimeout(this._susurroTimer);
+    clearTimeout(this._cooldownTimer);
+    clearTimeout(this._reintento);
+    clearInterval(this._vigia);
+    this.cola.length = 0;
+    this._enCooldown = false;
     this.#soltarFoco();
     this.activo = false;
     document.body.classList.remove('jc-guiando');
     if (this.el) {
       gsap.killTweensOf(this.el);
+      if (this.$tiempo) gsap.killTweensOf(this.$tiempo);
       gsap.set(this.el, { clearProps: 'opacity,transform' });
-      this.el.classList.remove('jc-on', 'jc-habla');
+      this.el.classList.remove('jc-on', 'jc-habla', 'jc-susurro', 'jc-leccion');
     }
+  }
+
+  /**
+   * ¿Justus tiene algo entre manos? (hablando ahora o esperando turno).
+   * Los niveles lo consultan para no encadenar avisos encima de una lección
+   * —o para saber si una lección ya vista ni siquiera llegó a abrirse—.
+   */
+  get ocupado() {
+    return this.activo || this.cola.length > 0;
   }
 
   /** Muestra u oculta la pata de ayuda (un nivel puede no querer el estorbo). */

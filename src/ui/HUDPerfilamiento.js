@@ -66,13 +66,20 @@ export class HUDPerfilamiento {
    */
   showFicha(p, on) {
     const f = this.$('.pf-ficha');
+    // El aviso de «esta ficha no trae rasgos físicos» es la tesis del nivel, y
+    // se entiende a la PRIMERA. Repetirlo en cada una de las siete fichas lo
+    // convertía en un párrafo que el ojo aprende a saltar para llegar al dato —
+    // justo lo contrario de lo que pretende. Se dice una vez y se calla.
+    const tesis = this.tesisDicha ? '' : `
+      <div class="pf-sin-rasgos">La ficha del oficial <b>no registra rasgos físicos</b>.
+        Solo conducta observable, que es lo único que se puede escribir en un acta.</div>`;
+    this.tesisDicha = true;
     f.innerHTML = `
       <div class="pf-f-cab">
         <h4>${p.nombre}</h4>
         <span class="pf-f-id">OBSERVACIÓN DIRECTA</span>
       </div>
-      <div class="pf-sin-rasgos">La ficha del oficial <b>no registra rasgos físicos</b>.
-        Solo conducta observable, que es lo único que se puede escribir en un acta.</div>
+      ${tesis}
       <div class="pf-obs-tit">LO QUE ESTÁ HACIENDO</div>
       <div class="pf-obs"><b>▸</b><span>${p.conducta.largo}</span></div>
       <button class="pf-derivar">⚑ MARCAR PARA REVISIÓN</button>
@@ -253,14 +260,16 @@ export class HUDPerfilamiento {
       @S .pf-ficha h4 { font-size: 13px; }
       @S .pf-sin-rasgos { font-size: 9px; padding: 6px 7px; }
       @S .pf-obs { font-size: 10.5px; padding: 7px 8px; }
-      @S .pf-derivar { font-size: 10.5px; min-height: 40px; }
+      /* 44 px es el suelo tactil del proyecto: por debajo el toque falla y en
+         esta sala se marca a una PERSONA, que es la accion mas seria del acto. */
+      @S .pf-derivar { font-size: 10.5px; min-height: 44px; }
       @S .pf-dock { bottom: 10px; gap: 6px; }
-      @S .pf-dock .g-btn { min-height: 42px; padding: 9px 13px; font-size: 10.5px; letter-spacing: .07em; }
+      @S .pf-dock .g-btn { min-height: 44px; padding: 10px 13px; font-size: 10.5px; letter-spacing: .07em; }
       @S .pf-mot-caja { padding: 15px 16px; }
       @S .pf-inf-caja { padding: 15px 16px; }
       @S .pf-mot-caja h3 { font-size: 12px; }
       @S .pf-mot-txt { font-size: 10.5px; margin-bottom: 10px; }
-      @S .pf-op { font-size: 10.5px; padding: 9px 10px; min-height: 40px; }
+      @S .pf-op { font-size: 10.5px; padding: 10px; min-height: 44px; }
       @S .pf-mot-rechazo { font-size: 10.5px; }
       @S .pf-inf-caja h3 { font-size: 15px; }
       @S .pf-inf-caja p { font-size: 11.5px; }

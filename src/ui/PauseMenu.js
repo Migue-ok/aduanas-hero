@@ -128,7 +128,7 @@ export class PauseMenu {
         color: #b9c6d4; text-align: left;
       }
       .pz-toggle {
-        min-height: 40px; padding: 8px 14px; cursor: pointer; border-radius: 6px;
+        min-height: 44px; padding: 8px 14px; cursor: pointer; border-radius: 6px;
         background: rgba(63,196,127,.16); color: #3fc47f;
         border: 1px solid rgba(63,196,127,.45);
         font-family: var(--f-data, monospace); font-size: 12px; letter-spacing: .1em;

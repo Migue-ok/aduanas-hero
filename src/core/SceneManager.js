@@ -33,41 +33,35 @@ export class SceneManager {
   }
 
   #buildMenu() {
+    // ── CROMOS, NO FICHAS DE CATÁLOGO ─────────────────────────────────────
+    // Cada nivel traía etiqueta + nombre largo + un párrafo de hasta 180
+    // caracteres + la lista de controles: 756 px de contenido en los 375 de alto
+    // de un móvil apaisado, o sea que había que arrastrar la pantalla de INICIO.
+    // Nadie lee cuatro sinopsis para elegir a qué jugar; se elige por la pinta y
+    // por UN verbo. El detalle de cada nivel ya lo cuenta su propio briefing al
+    // entrar, que es donde sirve.
+    const NIVELES = [
+      { id: 'aeropuerto', n: 1, icono: '🛂', nombre: 'Aeropuerto', verbo: 'Interroga y sella', tono: '#e0952a' },
+      { id: 'chimbote', n: 2, icono: '🚢', nombre: 'Puerto', verbo: 'Recorre el muelle', tono: '#4fd0e0' },
+      { id: 'trafasport', n: 3, icono: '🚔', nombre: 'Operativo', verbo: 'Historia narrada', tono: '#e04a3c' },
+      { id: 'centropostal', n: 4, icono: '📦', nombre: 'Centro Postal', verbo: 'Contrarreloj', tono: '#3fc47f' },
+    ];
     const menu = document.createElement('div');
     menu.id = 'level-menu';
     menu.innerHTML = `
       <div class="lm-inner">
-        <div class="lm-badge">DIRECCIÓN DE ADUANAS · SELECCIÓN DE DESTINO</div>
         <h1 class="lm-title">ADUANAS <span>HERO</span></h1>
-        <p class="lm-sub">Elige tu puesto de servicio para este turno.</p>
+        <p class="lm-sub">¿Dónde haces guardia hoy?</p>
         <div class="lm-cards">
-          <button class="lm-card" data-level="aeropuerto">
-            <div class="lm-card-tag">NIVEL 1</div>
-            <div class="lm-card-name">Aeropuerto Jorge Chávez</div>
-            <div class="lm-card-desc">Control de llegadas. Interrogatorio de escritorio, rayos X, Justus K-9. El turno noche clásico.</div>
-            <div class="lm-card-mode">▸ Modo escritorio</div>
-          </button>
-          <button class="lm-card" data-level="chimbote">
-            <div class="lm-card-tag">NIVEL 2</div>
-            <div class="lm-card-name">Puerto de Chimbote</div>
-            <div class="lm-card-desc">Inspección marítima. Camina el muelle entre contenedores, cruza el manifiesto con los rayos X portátiles.</div>
-            <div class="lm-card-mode">▸ Free-roam · WASD + ratón</div>
-          </button>
-          <button class="lm-card" data-level="trafasport">
-            <div class="lm-card-tag">NIVEL 3</div>
-            <div class="lm-card-name">Operativo Trafasport</div>
-            <div class="lm-card-desc">La historia de Mateo y las Zapatillas, narrada por voz: olfato K-9, allanamiento caótico, persecución y la lección final.</div>
-            <div class="lm-card-mode">▸ Raid narrativo · 5 fases · 🎧 voz</div>
-          </button>
-          <button class="lm-card" data-level="centropostal">
-            <div class="lm-card-tag">NIVEL 4</div>
-            <div class="lm-card-name">Centro Postal</div>
-            <div class="lm-card-desc">Encomiendas a contrarreloj. Lee el síntoma, elige la herramienta y dispara el pulso antes de que el bulto suba al camión. Luego arma el acta en la Mesa de Peritaje.</div>
-            <div class="lm-card-mode">▸ Oleadas · WASD/ratón + táctil</div>
-          </button>
+          ${NIVELES.map((l) => `
+          <button class="lm-card" data-level="${l.id}" style="--tono:${l.tono}">
+            <span class="lm-card-ico">${l.icono}</span>
+            <span class="lm-card-tag">N${l.n}</span>
+            <span class="lm-card-name">${l.nombre}</span>
+            <span class="lm-card-verbo">${l.verbo}</span>
+          </button>`).join('')}
         </div>
         <div class="lm-expediente g-pill"></div>
-        <p class="lm-hint">Auriculares recomendados · 16+ · Tu reputación es una sola para toda la carrera</p>
       </div>`;
     document.body.appendChild(menu);
     this.menu = menu;
@@ -161,52 +155,72 @@ export class SceneManager {
         opacity: 1; transition: opacity .5s ease;
       }
       #level-menu.hidden { opacity: 0; pointer-events: none; }
-      #level-menu .lm-inner { text-align: center; max-width: 900px; padding: 24px; }
-      #level-menu .lm-badge {
-        font-family: 'Courier New', monospace; letter-spacing: .28em; font-size: 12px;
-        color: #7d8ba0; border: 1px solid #2b3648; display: inline-block;
-        padding: 8px 16px; margin-bottom: 26px;
-      }
-      #level-menu .lm-title { font-size: 62px; margin: 0 0 6px; letter-spacing: .04em; font-weight: 700; }
+      #level-menu .lm-inner { text-align: center; width: 100%; max-width: 720px; padding: clamp(14px, 3vw, 24px); }
+      #level-menu .lm-title { font-size: clamp(30px, 7vw, 58px); margin: 0 0 4px; letter-spacing: .04em; font-weight: 700; }
       #level-menu .lm-title span { color: #e0952a; }
-      #level-menu .lm-sub { color: #9aa6b6; margin: 0 0 34px; font-style: italic; }
-      #level-menu .lm-cards { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+      #level-menu .lm-sub { color: #9aa6b6; margin: 0 0 clamp(14px, 3vh, 26px); font-style: italic;
+        font-size: clamp(12px, 3vw, 16px); }
+
+      /* ── LOS CUATRO CROMOS ────────────────────────────────────────────
+         Rejilla de dos columnas que en cuanto hay sitio se pone en cuatro. Cada
+         cromo es un cuadrado con icono grande, número, nombre y un verbo: se
+         elige mirando, no leyendo. Antes eran cuatro fichas de catálogo con
+         párrafo, y el menú entero pedía scroll en un móvil apaisado. */
+      #level-menu .lm-cards {
+        display: grid; grid-template-columns: repeat(2, 1fr);
+        gap: clamp(8px, 2vw, 14px);
+      }
+      @media (min-width: 620px) { #level-menu .lm-cards { grid-template-columns: repeat(4, 1fr); } }
       #level-menu .lm-card {
-        flex: 1 1 320px; max-width: 380px; text-align: left; cursor: pointer;
-        background: linear-gradient(160deg, rgba(28,38,54,.9), rgba(12,17,26,.9));
-        border: 1px solid #2f3d52; border-radius: 4px; padding: 22px 24px;
-        color: inherit; font-family: inherit; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+        position: relative; cursor: pointer; overflow: hidden;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 2px; min-height: 96px; padding: clamp(10px, 2.4vw, 16px) 8px;
+        background: linear-gradient(165deg, rgba(28,38,54,.92), rgba(12,17,26,.94));
+        border: 1px solid #2f3d52; border-top: 3px solid var(--tono, #e0952a);
+        border-radius: 12px; color: inherit; font-family: inherit;
+        transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
       }
       #level-menu .lm-card:hover {
-        transform: translateY(-4px); border-color: #e0952a;
-        box-shadow: 0 16px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(224,149,42,.3);
+        transform: translateY(-4px); border-color: var(--tono, #e0952a);
+        box-shadow: 0 16px 40px rgba(0,0,0,.55), 0 0 0 1px var(--tono, #e0952a);
       }
+      #level-menu .lm-card:active { transform: translateY(0) scale(.97); }
+      #level-menu .lm-card-ico { font-size: clamp(26px, 7vw, 38px); line-height: 1.1; }
       #level-menu .lm-card-tag {
-        font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: .25em;
-        color: #e0952a; margin-bottom: 10px;
+        position: absolute; top: 7px; left: 9px;
+        font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: .12em;
+        color: var(--tono, #e0952a); opacity: .85;
       }
-      #level-menu .lm-card-name { font-size: 25px; margin-bottom: 10px; }
-      #level-menu .lm-card-desc { font-size: 14px; line-height: 1.55; color: #a9b4c2; margin-bottom: 16px; }
-      #level-menu .lm-card-mode { font-family: 'Courier New', monospace; font-size: 12px; color: #6f7d90; }
-      #level-menu .lm-hint { margin-top: 14px; color: #5f6b7c; font-size: 12px; font-family: 'Courier New', monospace; }
-      #level-menu .lm-expediente { margin-top: 26px; font-size: 12px; letter-spacing: .1em; }
+      #level-menu .lm-card-name {
+        font-size: clamp(13px, 3.4vw, 17px); font-weight: 700; line-height: 1.2; margin-top: 3px;
+      }
+      #level-menu .lm-card-verbo {
+        font-family: 'Courier New', monospace; font-size: clamp(9px, 2.3vw, 11px);
+        color: #93a1b4; letter-spacing: .04em; line-height: 1.3;
+      }
+      #level-menu .lm-expediente {
+        margin-top: clamp(14px, 3vh, 26px); font-size: clamp(10px, 2.4vw, 12px); letter-spacing: .1em;
+      }
       #level-menu .lm-expediente b { color: #e0952a; letter-spacing: .16em; }
 
-      /* ── TÁCTIL: el menú se APILA siempre (ADR-008) ──────────────────
-         Anclado al puntero grueso, no al ancho: un móvil apaisado mide 932 px
-         y se escapaba de un max-width de 900px, quedando con tarjetas exprimidas. */
+      /* ── TÁCTIL (ADR-008) ─────────────────────────────────────────────
+         Anclado al puntero grueso, no al ancho: un móvil apaisado mide 932 px y
+         se escapaba de un max-width de 900px. Ya no hace falta apilar en columna
+         —los cromos caben en rejilla— pero sí garantizar que el menú entero
+         entra sin arrastrar: es la pantalla de INICIO. */
       @media (pointer: coarse) {
-        #level-menu { overflow-y: auto; align-items: flex-start; padding: 16px 0 28px; }
-        #level-menu .lm-inner { padding: 14px; max-width: 100%; }
-        #level-menu .lm-title { font-size: clamp(26px, 5.6vw, 54px); }
-        #level-menu .lm-sub { font-size: clamp(11px, 1.7vw, 15px); margin-bottom: 18px; }
-        #level-menu .lm-badge { font-size: clamp(8px, 1.3vw, 11px); letter-spacing: .16em; padding: 6px 10px; margin-bottom: 14px; }
-        #level-menu .lm-cards { flex-direction: column; gap: 12px; align-items: stretch; }
-        #level-menu .lm-card { flex: 1 1 auto; max-width: 100%; padding: 14px 16px; min-height: 48px; }
-        #level-menu .lm-card-name { font-size: clamp(16px, 2.6vw, 24px); }
-        #level-menu .lm-card-desc { font-size: clamp(10px, 1.6vw, 14px); line-height: 1.45; margin-bottom: 8px; }
-        #level-menu .lm-card-tag, #level-menu .lm-card-mode { font-size: clamp(9px, 1.3vw, 12px); }
-        #level-menu .lm-hint { margin-top: 16px; font-size: clamp(9px, 1.3vw, 12px); padding: 0 14px; line-height: 1.5; }
+        #level-menu { overflow-y: auto; padding: 10px 0; }
+        #level-menu .lm-inner { padding: 10px 12px; max-width: 100%; }
+        #level-menu .lm-card { min-height: 88px; }
+      }
+      /* Apaisado bajo: el título cede altura para que los cromos no se corten. */
+      @media (max-height: 460px) and (pointer: coarse) {
+        #level-menu .lm-title { font-size: clamp(22px, 5vw, 34px); }
+        #level-menu .lm-sub { margin-bottom: 10px; font-size: 11px; }
+        #level-menu .lm-cards { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        #level-menu .lm-card { min-height: 78px; padding: 8px 6px; }
+        #level-menu .lm-card-ico { font-size: 24px; }
+        #level-menu .lm-expediente { margin-top: 10px; }
       }
 
     `;

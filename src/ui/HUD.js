@@ -47,6 +47,44 @@ export class HUD {
     `;
     this.$ = (id) => root.querySelector(`#${id}`);
     this.typeTimer = null;
+    // Girar el teléfono cambia el alto de la libreta y, con él, dónde cabe la
+    // cinta de diálogo (ver `ajustarDialogo`).
+    this._onResize = () => { this.medirDock(); this.ajustarDialogo(); };
+    window.addEventListener('resize', this._onResize);
+    window.addEventListener('orientationchange', this._onResize);
+  }
+
+  /**
+   * Planta la cinta de diálogo JUSTO ENCIMA de la libreta del interrogatorio.
+   *
+   * En escritorio conviven sin problema: la libreta ocupa el tercio izquierdo y
+   * el diálogo el centro. En un teléfono no: la libreta pasa a ocupar el 94 %
+   * del ancho y sube hasta media pantalla, así que la cinta —que estaba clavada
+   * al 16 % del borde inferior— le caía justo encima y la RESPUESTA DEL
+   * PASAJERO, que es el dato entero del interrogatorio, quedaba tapada por las
+   * preguntas. Se mide la libreta en vez de repartir la pantalla con vh
+   * inventados: si crece con cada pregunta, el diálogo sube con ella.
+   */
+  ajustarDialogo() {
+    const d = this.$('dialogo');
+    if (!d) return;
+    const libreta = this.$('interrogatorio');
+    const compacto = matchMedia('(pointer: coarse), (max-width: 768px)').matches;
+    if (!compacto || !libreta || libreta.classList.contains('oculto')) {
+      d.style.bottom = ''; d.style.maxHeight = '';
+      return;
+    }
+    // Se usa el BORDE SUPERIOR de la libreta, no su altura: la libreta ya no
+    // está pegada al suelo (se apoya sobre el dock vía `--dock-h`), así que
+    // calcular con la altura dejaba la cinta metida dentro de las preguntas.
+    const caja = libreta.getBoundingClientRect();
+    // Techo real: la barra superior. Sin descontarla, la cinta crecía hasta
+    // taparle el botón de narración, que es el único control de accesibilidad
+    // permanente del puesto.
+    const barra = this.$('dock')?.ownerDocument.querySelector('.topbar');
+    const techo = barra ? Math.round(barra.getBoundingClientRect().bottom) : 30;
+    d.style.bottom = `${Math.round(window.innerHeight - caja.top) + 12}px`;
+    d.style.maxHeight = `${Math.max(36, Math.round(caja.top) - techo - 12)}px`;
   }
 
   // ── Barra superior ──────────────────────────────────────────────────
@@ -119,6 +157,7 @@ export class HUD {
   dialog(hablante, texto, cps = 45) {
     const d = this.$('dialogo');
     clearInterval(this.typeTimer);
+    this.ajustarDialogo();
     d.classList.add('visible');
     d.querySelector('.hablante').textContent = hablante.toUpperCase();
     const target = d.querySelector('.texto');
@@ -151,9 +190,35 @@ export class HUD {
       dock.appendChild(el);
     }
     abrirPanel(dock, { y: 22, scale: 1, duration: 0.4, sfx: false });
+    this.medirDock();
   }
 
-  hideDock() { cerrarPanel(this.$('dock'), { y: 18 }); }
+  hideDock() {
+    cerrarPanel(this.$('dock'), { y: 18 });
+    document.documentElement.style.setProperty('--dock-h', '0px');
+  }
+
+  /**
+   * Publica el alto real del dock en `--dock-h`.
+   *
+   * Los paneles de herramienta se apoyan en esa variable para plantarse ENCIMA
+   * de él. Antes iban a `bottom: 10px` fijo y en un teléfono apaisado el dock
+   * —que crece a dos filas cuando los cinco botones no caben en una— se comía
+   * el pie de la libreta: las últimas preguntas y el botón VOLVER quedaban
+   * debajo de INTERROGAR y DOCUMENTOS, tocables solo por accidente. El número
+   * se mide en vez de estimarse porque depende de cuántos botones haya, de
+   * cuántas filas ocupen y del tamaño de fuente del dispositivo.
+   */
+  medirDock() {
+    const dock = this.$('dock');
+    if (!dock) return;
+    // Tras la animación de entrada: durante el tween el alto aún no es el final.
+    requestAnimationFrame(() => {
+      const alto = dock.classList.contains('oculto') ? 0 : Math.round(dock.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--dock-h', `${alto}px`);
+      this.ajustarDialogo();
+    });
+  }
 
   // ── Interrogatorio: la LIBRETA del oficial ──────────────────────────
   // Nada de cajones grises: una libreta de papel con preguntas anotadas a mano
@@ -167,20 +232,35 @@ export class HUD {
     const conf = evidencias.length
       ? `<button class="tactica confrontar" data-t="confrontar" ${off} title="Confrontar con la evidencia del expediente">📎<span>CONFRONTAR (${evidencias.length})</span></button>`
       : '';
+    // Tres bloques, y el orden importa: TÍTULO fijo · PREGUNTAS con scroll ·
+    // TÁCTICAS y salida fijas al pie. En un teléfono apaisado la libreta no cabe
+    // entera, y con todo en un mismo scroll las cuatro tácticas —PRESIONAR,
+    // CALMAR, SILENCIO, CONFRONTAR— caían fuera del área visible: el jugador
+    // solo veía preguntas y no encontraba cómo apretar. Ahora lo que se arrastra
+    // es la lista; las acciones no se mueven. En escritorio el envoltorio no
+    // cambia nada (`libreta-scroll` solo cobra sentido con la pantalla tumbada).
     p.innerHTML = `
       <div class="libreta-titulo">LIBRETA DEL OFICIAL${agotado ? ' — sin más preguntas: la fila aprieta' : ''}</div>
-      <div class="temas">${temas}</div>
+      <div class="libreta-scroll">
+        <div class="temas">${temas}</div>
+        <div class="libreta-pista">👁 Toca al pasajero — ojos · garganta · manos · postura — cuando su cuerpo hable.</div>
+        <div id="tell-slot"></div>
+      </div>
       <div class="tacticas">
         <button class="tactica" data-t="presionar" ${off} title="Subir la presión"><b>⚡</b><span>PRESIONAR</span></button>
         <button class="tactica" data-t="calmar" ${off} title="Bajar la tensión y diagnosticar"><b>🕊</b><span>CALMAR</span></button>
         <button class="tactica" data-t="silencio" ${off} title="Sostener la mirada y esperar"><b>…</b><span>SILENCIO</span></button>
         ${conf}
       </div>
-      <div class="libreta-pista">👁 Toca al pasajero — ojos · garganta · manos · postura — cuando su cuerpo hable.</div>
-      <div id="tell-slot"></div>
       <button class="volver" data-t="cerrar">◂ VOLVER AL PUESTO</button>
     `;
     abrirPanel(p, { y: 20, scale: 0.96, duration: 0.46 });
+    // Dos veces: ahora, para que la cinta no se quede tapada ni un fotograma, y
+    // al terminar la animación, cuando la libreta ya está en su sitio definitivo
+    // (durante el tween está desplazada y escalada, y medirla ahí engaña).
+    this.ajustarDialogo();
+    clearTimeout(this._ajusteTimer);
+    this._ajusteTimer = setTimeout(() => this.ajustarDialogo(), 520);
     p.querySelectorAll('button.tema').forEach((b) => {
       b.onclick = () => { audio.clic(); on.preguntar(b.dataset.tema); };
     });
@@ -190,7 +270,12 @@ export class HUD {
     p.querySelector('[data-t="cerrar"]').onclick = () => { audio.clic(); on.cerrar(); };
   }
 
-  hideInterrogation() { cerrarPanel(this.$('interrogatorio')); }
+  hideInterrogation() {
+    cerrarPanel(this.$('interrogatorio'));
+    // El cierre se anima: la cinta recupera su sitio cuando la libreta ya no
+    // ocupa nada, no antes (si no, salta hacia abajo mientras la otra se va).
+    setTimeout(() => this.ajustarDialogo(), 300);
+  }
 
   /** Chip de tell registrable: aparece cuando el cuerpo "habló" y el jugador puede anotarlo. */
   showTellChip(texto, onClick) {
@@ -270,19 +355,26 @@ export class HUD {
   // ── Escáner corporal (siluetas, Visión §28.2) ───────────────────────
   showCorporal(onMark, onClose) {
     const p = this.$('corporal');
+    // La anomalía se dibuja pequeña —una mancha de 42 px en la silueta— pero se
+    // TOCA grande: `za-hit` es una elipse transparente del doble de tamaño que
+    // recibe el dedo. Es el único objetivo del juego que no puede crecer sin
+    // mentir sobre lo que el escáner ve, así que dibujo y hitbox se separan.
     p.innerHTML = `
       <h3>ESCÁNER CORPORAL · PROTOCOLO</h3>
       <svg viewBox="0 0 100 220">
         <path d="M50 10 a12 12 0 1 0 0.1 0 M38 40 h24 l6 55 h-8 l-4 100 h-8 l-2 -60 l-2 60 h-8 l-4 -100 h-8 z"
           fill="#27374a" stroke="#4a6a8a" stroke-width="1.5"/>
-        <ellipse class="zona-anomala" cx="50" cy="88" rx="11" ry="14" fill="rgba(208,138,29,0.55)"/>
+        <g class="zona-anomala">
+          <ellipse class="za-hit" cx="50" cy="88" rx="22" ry="24" fill="transparent"/>
+          <ellipse class="za-marca" cx="50" cy="88" rx="11" ry="14" fill="rgba(208,138,29,0.55)"/>
+        </g>
       </svg>
       <p style="font-size:11px;color:#8a95a3;letter-spacing:1px">Representación por siluetas. Toca la anomalía.</p>
       <button style="margin-top:10px">CERRAR</button>
     `;
     abrirPanel(p, { y: 18, scale: 0.9, duration: 0.5 });
     p.querySelector('.zona-anomala').addEventListener('click', () => {
-      p.querySelector('.zona-anomala').style.fill = 'rgba(194,43,43,0.8)';
+      p.querySelector('.za-marca').style.fill = 'rgba(194,43,43,0.8)';
       audio.clic('firme');
       onMark();
     }, { once: true });

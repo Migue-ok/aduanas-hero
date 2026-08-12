@@ -34,36 +34,61 @@ html, body {
   button { min-height: 48px; }
 }
 
-/* ── Pantalla de título ─────────────────────────────────────────────── */
+/* ── Portada ─────────────────────────────────────────────────────────────
+   La ilustración manda y el texto se aparta. Antes eran cuatro bloques de tipo
+   —sello institucional, título, dos líneas de subtítulo y aviso de auriculares—
+   flotando sobre un degradado negro: una pantalla de menú de los noventa para un
+   juego cuyo argumento visual son muñecos con ojos saltones. El arte de portada
+   (`public/portada.jpg`, ADR-004) enseña de qué va el juego en el primer
+   segundo, que es exactamente lo que un texto no consigue.
+
+   El degradado sobre la imagen no es decoración: garantiza el contraste del
+   título pase lo que pase con la foto, que es lo único que no se puede dejar
+   al azar. */
 #title-screen {
   position: fixed; inset: 0; z-index: 100;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: flex-end; justify-content: center;
   background:
-    radial-gradient(ellipse at 50% 30%, rgba(30, 44, 66, 0.55), transparent 60%),
+    linear-gradient(180deg, rgba(4, 7, 11, 0.62) 0%, rgba(4, 7, 11, 0.25) 34%,
+      rgba(4, 7, 11, 0.72) 72%, rgba(4, 7, 11, 0.96) 100%),
+    url('/portada.jpg') center 42% / cover no-repeat,
     linear-gradient(#05070b, #090d14);
   transition: opacity 1.6s ease;
 }
 #title-screen.hidden { opacity: 0; pointer-events: none; }
-.title-inner { text-align: center; max-width: 560px; padding: 24px; }
-.title-badge {
-  display: inline-block; padding: 6px 14px; margin-bottom: 26px;
-  border: 1px solid var(--panel-line); color: var(--ink-dim);
-  letter-spacing: 3px; font-size: 11px;
+.title-inner {
+  text-align: center; max-width: 560px; width: 100%;
+  padding: 24px 24px clamp(24px, 7vh, 56px);
 }
 #title-screen h1 {
-  font-family: var(--serif); font-size: 72px; line-height: 0.95;
-  letter-spacing: 10px; color: #eef3f9; text-shadow: 0 0 40px rgba(80, 130, 200, 0.35);
+  font-family: var(--serif); font-size: clamp(44px, 9vw, 76px); line-height: 0.92;
+  letter-spacing: 8px; color: #fff;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 46px rgba(0, 0, 0, 0.9);
 }
 #title-screen h1 span { color: var(--accent); }
-.title-sub { margin: 26px 0 34px; color: var(--ink-dim); line-height: 1.7; font-size: 13px; }
-#btn-start {
-  font-family: var(--mono); font-size: 16px; letter-spacing: 4px;
-  padding: 14px 42px; cursor: pointer;
-  color: var(--ink); background: transparent; border: 1px solid var(--accent);
-  transition: background 0.3s, color 0.3s;
+.title-sub {
+  margin: 14px 0 22px; color: #cfd9e6; font-size: clamp(12px, 3.2vw, 15px);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
 }
-#btn-start:hover { background: var(--accent); color: #10131a; }
-.title-hint { margin-top: 22px; font-size: 11px; color: #4a5460; letter-spacing: 2px; }
+/* Botón sólido, no fantasma: es LA acción de la pantalla y sobre una
+   ilustración un borde de 1 px se pierde. */
+#btn-start {
+  font-family: var(--mono); font-size: clamp(15px, 4vw, 18px); letter-spacing: 4px;
+  padding: 16px 46px; min-height: 56px; cursor: pointer; border-radius: 8px;
+  color: #10131a; font-weight: 700;
+  background: linear-gradient(180deg, #ffca6a, #e8a032); border: none;
+  box-shadow: 0 8px 26px rgba(232, 160, 50, 0.42), 0 2px 0 rgba(255, 255, 255, 0.35) inset;
+  transition: transform 0.12s, box-shadow 0.25s, filter 0.25s;
+}
+#btn-start:hover { filter: brightness(1.08); box-shadow: 0 10px 32px rgba(232, 160, 50, 0.6); }
+#btn-start:active { transform: translateY(2px); }
+/* El 16+ donde vive en cualquier carátula: esquina, pequeño, sin explicaciones. */
+.title-rating {
+  position: absolute; right: 14px; top: 14px;
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: #cfd9e6; background: rgba(4, 7, 11, 0.66);
+  border: 1px solid rgba(207, 217, 230, 0.35); border-radius: 6px; padding: 5px 9px;
+}
 
 /* ── Estructura del HUD ─────────────────────────────────────────────── */
 #hud-root { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
@@ -282,6 +307,10 @@ html, body {
 }
 #corporal svg { width: 190px; margin: 12px auto; display: block; }
 #corporal .zona-anomala { cursor: pointer; animation: chip-pulse 1s infinite; }
+/* Un relleno transparente NO recibe el puntero con el `visiblePainted` que trae
+   el SVG por defecto: solo cuenta lo pintado. `all` es lo que convierte esta
+   elipse invisible en el objetivo táctil de verdad. */
+#corporal .za-hit { pointer-events: all; }
 
 /* Decisión */
 #decision { bottom: 88px; left: 50%; transform: translateX(-50%); text-align: center; background: transparent; border: none; }
@@ -347,9 +376,16 @@ html, body {
 .sheet button:hover { background: #4a3f28; }
 .sheet .brief-body { font-size: 15px; line-height: 1.7; }
 
-/* Aviso flotante (Justus, abusos, sistema) */
+/* Aviso flotante (Justus, abusos, sistema).
+   `pointer-events: none` no es un detalle: `#hud-root > *` da el dedo a todos
+   sus hijos, así que este aviso —que se planta en mitad de la pantalla y dura
+   3,2 s— se tragaba los toques de lo que tuviera debajo. En un teléfono, donde
+   cae justo sobre la libreta del interrogatorio, eran tres segundos de juego
+   muerto cada vez que el pasajero se cerraba en banda. No es un control: es un
+   cartel, y por un cartel se toca. */
 .toast {
   position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+  pointer-events: none;
   padding: 12px 22px; background: var(--panel); border-left: 3px solid var(--blue);
   font-size: 13px; letter-spacing: 1px; opacity: 0; transition: opacity 0.3s;
   max-width: 520px; text-align: center; line-height: 1.5;
@@ -367,12 +403,18 @@ html, body {
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1024px) {
   html, body { font-size: 13px; }
 
-  /* Título */
-  .title-inner { max-width: 92vw; padding: 16px; }
-  #title-screen h1 { font-size: clamp(38px, 13vw, 64px); letter-spacing: 6px; }
-  .title-sub { font-size: 12px; margin: 18px 0 26px; }
-  .title-badge { font-size: 10px; letter-spacing: 2px; margin-bottom: 18px; }
-  #btn-start { font-size: 15px; padding: 15px 34px; min-height: 52px; }
+  /* Portada. Los tamaños base ya son fluidos con clamp(): aquí solo se aprieta
+     el interlineado del título y se sube el botón, que es lo único que se toca. */
+  .title-inner { max-width: 92vw; padding: 16px 16px clamp(18px, 6vh, 40px); }
+  #title-screen h1 { letter-spacing: 5px; }
+  .title-sub { margin: 12px 0 18px; }
+  #btn-start { padding: 16px 38px; min-height: 56px; }
+  /* En apaisado la ilustración se recorta más arriba: el mostrador y los
+     personajes viven en la mitad baja y no pueden quedar fuera del encuadre. */
+  /* Una posición por capa, en orden: velo · ilustración · fondo de respaldo.
+     Solo se mueve la del medio; a los degradados hay que repetirles su 0 0 o se
+     descuadran con ella. */
+  #title-screen { background-position: 0 0, center 58%, 0 0; }
 
   /* Topbar: dos líneas antes que texto cortado */
   .topbar { padding: 8px 10px; font-size: 9px; letter-spacing: 1px; gap: 8px; flex-wrap: wrap; }
@@ -574,6 +616,143 @@ html, body {
   /* Ficha y expediente no pueden comerse la escena en un ancho de 390 px */
   #ficha, #expediente { width: 43vw; max-height: 26vh; padding: 9px 10px; }
   .dialogo { width: 95vw; max-width: 95vw; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ADR-014 · REMEDIACIÓN TÁCTIL — hitboxes reales y menos capas a la vez
+   ───────────────────────────────────────────────────────────────────────
+   Medido en un teléfono emulado (667×375 y 375×667), no estimado. Dos cosas
+   arruinaban el puesto en móvil:
+
+   1. HITBOXES. El proyecto ya subía todo `button` a 48 px, pero tres de las
+      acciones más repetidas del nivel NO son botones —una línea de documento
+      es un `div`, el chip de tell un `span` y la anomalía corporal una elipse
+      SVG— y se quedaban entre 37 y 40 px. Justo las que hay que acertar con el
+      pulgar mientras la fila aprieta.
+   2. DENSIDAD. Con una herramienta abierta convivían en 375 px de alto: barra
+      superior, marcador, ficha, expediente, cinta de diálogo, el panel de la
+      herramienta y el dock. Siete capas. Aquí los dos paneles de CONSULTA se
+      pliegan mientras hay una herramienta en pantalla: siguen accesibles (con
+      scroll propio) pero dejan de disputarle sitio a la acción.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (pointer: coarse), (max-width: 768px) {
+  /* — Suelo táctil de 44 px para lo que no es <button> — */
+  .doc .linea.señalable {
+    display: flex; align-items: center; min-height: 44px; padding: 10px 6px;
+  }
+  .chip-tell {
+    display: flex; align-items: center; min-height: 44px; width: 100%;
+  }
+  /* El botón de narración necesita 44 px, pero la barra superior NO puede
+     crecer para dárselos: engordaba de 30 a 59 px y se comía el hueco donde
+     vive la respuesta del pasajero. Sale del flujo y se centra sobre el
+     degradado de la barra: zona táctil completa, barra intacta. */
+  /* El aviso baja al centro de la escena. Al 16 % del borde superior caía justo
+     sobre la cabecera del perfilamiento y sobre la ficha del pasajero, que son
+     paneles PERMANENTES; el centro lo ocupa el mundo 3D, que puede perder tres
+     segundos de vista sin que nadie se quede sin un dato. */
+  .toast { top: 46%; }
+
+  .tb-derecha { position: relative; padding-right: 50px; }
+  #btn-voz {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+    display: grid; place-items: center;
+  }
+
+  /* — Hojas (briefing, resumen): la firma no se busca con scroll —
+     El botón que cierra el trámite se ancla al pie de la hoja. Antes vivía al
+     final de un scroll de dos pantallas y había que ir a buscarlo. */
+  .sheet { padding-bottom: 0; }
+  .sheet button.firma {
+    position: sticky; bottom: 0; width: 100%; margin: 16px 0 0;
+    padding: 15px 20px; min-height: 52px;
+  }
+
+  /* — Los paneles de herramienta se apoyan SOBRE el dock, no debajo —
+     `--dock-h` lo publica `HUD.medirDock` con el alto real (el dock se parte en
+     dos filas cuando los cinco botones no caben). Sin esto, el pie de la
+     libreta —las últimas preguntas y VOLVER AL PUESTO— vivía tapado por los
+     propios botones del dock. */
+  #interrogatorio, #documentos { bottom: calc(var(--dock-h, 76px) + 10px); }
+  #xray-controls, #decision { bottom: calc(var(--dock-h, 76px) + 8px); }
+
+  /* Con la hoja de servicio abierta el dock no pinta nada: es un trámite de
+     firma, no un turno en curso. */
+  #hud-root:has(> .sheet:not(.oculto)) > #dock { display: none; }
+
+  /* — Densidad: los paneles de consulta se pliegan con una herramienta abierta — */
+  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #ficha {
+    max-height: 56px; padding: 8px 10px; opacity: 0.82;
+  }
+  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #expediente {
+    max-height: 74px; padding: 8px 10px; opacity: 0.82;
+  }
+  /* Documentos y rayos X ya ocupan la pantalla entera: la ficha detrás solo
+     estorba, y el jugador tiene el pasaporte físico delante. */
+  #hud-root:has(> #documentos:not(.oculto)) > #ficha,
+  #hud-root:has(> #xray-controls:not(.oculto)) > #ficha { display: none; }
+}
+
+/* ── Móvil apaisado: 375 px de alto para la libreta, el diálogo y el dock ───
+   La libreta llegaba a 534 px de contenido en 186 visibles: tres de las cinco
+   preguntas quedaban fuera y había que arrastrar a ciegas. No se quita ni una
+   pregunta —son el interrogatorio entero—: se ponen a DOS COLUMNAS, que baja
+   la lista de cinco filas a tres. La respuesta del pasajero se coloca encima
+   midiendo la libreta (ver `HUD.ajustarDialogo`). */
+@media (max-height: 460px) and (pointer: coarse) {
+  /* Apaisado deja sitio para CUATRO capas, no para siete: barra, respuesta del
+     pasajero, la herramienta y el dock. Los dos paneles de consulta se retiran
+     del todo mientras hay una herramienta abierta —a un toque de volver— en
+     lugar de encogerse hasta ser ilegibles. */
+  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #ficha,
+  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #expediente {
+    display: none;
+  }
+
+  /* LA LIBRETA SE PARTE EN DOS. Las cuatro tácticas y la salida son acciones
+     que tienen que estar SIEMPRE a mano; las preguntas son una lista que puede
+     crecer. Con todo en un mismo scroll, PRESIONAR · CALMAR · SILENCIO caían
+     fuera del área visible y el jugador solo veía preguntas. Ahora el bloque de
+     preguntas hace scroll dentro de la libreta y el resto queda anclado. */
+  /* 68vh es lo que deja el dock —que la escena oculta al entrar a interrogar—
+     conservando arriba el hueco de la cinta de diálogo. */
+  #interrogatorio {
+    display: flex; flex-direction: column; overflow: hidden;
+    max-height: 68vh; padding: 10px 12px 10px;
+  }
+  #interrogatorio > * { flex: 0 0 auto; }
+  /* El bloque de preguntas hace scroll, y se NOTA que lo hace: sin la sombra
+     inferior nadie arrastra una lista que parece terminada. */
+  #interrogatorio .libreta-scroll {
+    flex: 1 1 auto; min-height: 46px; overflow-y: auto; overscroll-behavior: contain;
+    -webkit-mask-image: linear-gradient(#000 78%, rgba(0, 0, 0, 0.45));
+    mask-image: linear-gradient(#000 78%, rgba(0, 0, 0, 0.45));
+  }
+
+  /* El dock se aprieta: cada píxel que suelta abajo es un píxel de preguntas
+     visibles arriba. 44 px sigue siendo objetivo táctil válido. */
+  .dock { padding: 5px 6px 7px; gap: 5px; }
+  .dock button { min-height: 44px !important; padding: 10px 8px; }
+  #interrogatorio .temas {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px;
+  }
+  #interrogatorio button.tema { margin-bottom: 0; font-size: 13px; padding: 10px 9px; }
+  #interrogatorio .tacticas { margin-bottom: 5px; }
+  #interrogatorio button.tactica { min-height: 48px; }
+  .libreta-titulo { margin-bottom: 6px; padding-bottom: 5px; }
+  /* El recordatorio de tocar al pasajero lo repite Justus: aquí es una línea. */
+  .libreta-pista { font-size: 10px; margin: 3px 0; line-height: 1.35; }
+
+  /* El escáner corporal es un panel centrado: con la pantalla tumbada crecía
+     por encima de la barra superior y se comía el botón de narración. */
+  #corporal {
+    top: 52px; bottom: 8px; transform: translateX(-50%);
+    max-height: calc(100vh - 62px); overflow-y: auto;
+  }
+  /* La silueta se mide contra la ALTURA, que es lo escaso al tumbar el móvil,
+     con suelo suficiente para que la zona de toque no baje de 44 px. */
+  #corporal svg { width: clamp(112px, 30vh, 190px); margin: 6px auto; }
 }
 
 /* ── Aviso de rotación: el juego pide apaisado ─────────────────────────── */

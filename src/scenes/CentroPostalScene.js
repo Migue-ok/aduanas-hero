@@ -30,31 +30,34 @@ import {
  * cuatro teclas por turnos. Esta lección enseña el bucle en el orden en que se
  * ejecuta, y la pieza central es el paso 4: cada herramienta lee UNA cosa.
  */
+/**
+ * Justus enseña el muelle en cuatro frases. Antes eran seis, y largas: 850
+ * caracteres que repetían lo que el briefing acababa de decir con dibujos. Un
+ * tutorial que se lee dos veces no se lee ninguna.
+ *
+ * Regla de escritura: cada paso es UNA frase, por debajo de 100 caracteres, y
+ * SEÑALA la cosa de la que habla. Lo que se puede enseñar apuntando no se
+ * escribe: para eso está `foco`.
+ */
 const leccionPostal = (touch) => [
   {
     txt: touch
-      ? '¡Jefe, Justus al habla! Esto es el centro de clasificación. Camine con el JOYSTICK: los bultos vienen por las cintas y no esperan a nadie.'
-      : '¡Jefe, Justus al habla! Esto es el centro de clasificación. Camine con W-A-S-D: los bultos vienen por las cintas y no esperan a nadie.',
+      ? 'Camine con el joystick, jefe. Las cintas no esperan.'
+      : 'Camine con W-A-S-D, jefe. Las cintas no esperan.',
     foco: touch ? '.tp-stick' : null,
   },
   {
-    txt: 'No tiene que apuntar: el bulto más cercano se marca solo y su ficha aparece a la izquierda. Acérquese a una cinta y lo verá.',
+    txt: 'El bulto más cercano se marca solo. Si lleva cartel ⚠, léalo: ahí pone qué le pasa.',
   },
   {
-    txt: 'Los sospechosos llevan un cartel ⚠ encima. LÉALO: ahí está escrito qué le pasa a esa caja. El que no lleva cartel está limpio y no se toca.',
-  },
-  {
-    txt: 'Y esto es lo que importa: cada herramienta lee UNA sola cosa. La forma, el papel, el olor o el peso. Lo pone debajo de cada una, en su cinturón.',
+    txt: 'Cada herramienta lee UNA cosa: la forma, el papel, el olor o el peso.',
     foco: '.cp-hotbar',
   },
   {
     txt: touch
-      ? 'Pregúntese de qué habla el cartel y elija esa herramienta. Luego pulse ESCANEAR. Si se equivoca de herramienta no le pasa nada… pero el bulto sigue avanzando.'
-      : 'Pregúntese de qué habla el cartel y elija esa herramienta con las teclas 1 a 4. Luego pulse Espacio. Si se equivoca no le pasa nada… pero el bulto sigue avanzando.',
+      ? 'Elija la que hable de eso y pulse ESCANEAR. Sin cartel, no se dispara.'
+      : 'Elija la que hable de eso (teclas 1-4) y pulse Espacio. Sin cartel, no se dispara.',
     foco: touch ? '.tp-btn' : '.cp-hotbar',
-  },
-  {
-    txt: 'Solo se castigan dos cosas: disparar a una caja SIN cartel, y dejar escapar una que sí lo tenía. Vaya, jefe, que ya arranca la cinta.',
   },
 ];
 
@@ -422,7 +425,13 @@ export class CentroPostalScene {
         // Si la lección ya estaba vista, `guiar` no abre nada y el callback no
         // llega nunca: sin esto, los consejos contextuales quedarían mudos para
         // siempre a partir de la segunda partida.
-        this._timers.push(setTimeout(() => { this.tutorialListo = true; }, 1500));
+        //
+        // Se comprueba EN EL ACTO en lugar de por temporizador. El respaldo
+        // anterior era un `setTimeout` de 1,5 s que saltaba siempre —también con
+        // la clase magistral en marcha— y ahí nacía el atasco de avisos del
+        // nivel: a los 2,4 s de arrancar la oleada ya estaban habilitados los
+        // consejos por dominio, que se disparaban con la lección a medias.
+        if (!coach.ocupado) this.tutorialListo = true;
       }, 900));
     }
   }
@@ -442,6 +451,13 @@ export class CentroPostalScene {
     if (!h) return;
     const clave = datos.senuelo ? 'centropostal:senuelo' : `centropostal:dom:${h.id}`;
     if (this.dominiosVistos?.has(clave)) return;
+    // Si Justus ya tiene algo entre manos, este consejo NO se encola: se deja
+    // sin marcar y volverá a salir la próxima vez que el jugador apunte a un
+    // bulto de este dominio. Recorrer el pasillo puede cruzar cuatro dominios en
+    // pocos segundos, y cuatro avisos encadenados —aunque la cola los ordene—
+    // siguen siendo cuatro avisos. Un consejo vale por llegar CON LA CAJA
+    // DELANTE; si llega tarde y en fila, ya no enseña nada.
+    if (coach.ocupado) return;
     (this.dominiosVistos ??= new Set()).add(clave);
     const txt = datos.senuelo
       ? 'Ojo con este, jefe: yo olfateo pero NO me siento. Eso suele ser comida. Verifíquelo conmigo '
