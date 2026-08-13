@@ -7,6 +7,7 @@ import { PostFX } from '../render/PostFX.js';
 import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.js';
 import { CameraShake, HitStop, flash } from '../core/Juice.js';
 import { cerrarNivel } from '../core/Disposal.js';
+import { Viewport } from '../core/Viewport.js';
 import { bus, Señal } from '../core/EventBus.js';
 import { puntaje, VALOR } from '../core/Puntaje.js';
 import { Marcador } from '../ui/Marcador.js';
@@ -15,6 +16,7 @@ import { audio } from '../audio/AudioEngine.js';
 import { narrator } from '../audio/Narrator.js';
 import { NAVE, construirCentroPostal, FabricaPaquetes, crearOficial } from '../world/CentroPostal.js';
 import { EfectosHerramienta } from '../world/EfectosHerramienta.js';
+import { RayoApuntado } from '../world/RayoApuntado.js';
 import { HUDCentroPostal } from '../ui/HUDCentroPostal.js';
 import { coach } from '../ui/JustusCoach.js';
 import {
@@ -138,7 +140,8 @@ export class CentroPostalScene {
     const canvas = document.getElementById('gl');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias });
     this.renderer.setPixelRatio(quality.pixelRatio);
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // `false`: el tamaño CSS del lienzo lo manda la hoja de estilos (ver Viewport).
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -159,6 +162,8 @@ export class CentroPostalScene {
 
     this.#construirHaz();
     this.efectos = new EfectosHerramienta(this.scene);
+    // Haz de apuntado: dice a QUÉ bulto va el pulso, que era invisible (ADR-013 §6).
+    this.rayo = new RayoApuntado(this.scene);
 
     this.shake = new CameraShake(this.camera);
     this.hitStop = new HitStop();
@@ -180,14 +185,21 @@ export class CentroPostalScene {
     }).mount();
     this.hud.setIntegridad(100);
 
+    // UN SOLO SITIO DONDE SE ELIGE HERRAMIENTA.
+    //
+    // Antes las cuatro salían DOS VECES en pantalla: como botones del mando
+    // abajo y como hotbar informativa arriba a la izquierda, y solo la de arriba
+    // decía qué lee cada una («la forma», «el papel»…) — que es justamente el
+    // dato que resuelve el nivel. El jugador miraba a un sitio para entender y
+    // tocaba en otro. Ahora la familia viaja EN el botón que se pulsa, y la
+    // hotbar se retira en táctil (`cp-hotbar--oculta`).
     this.pad = new TouchControls({
       joystick: true,
       buttons: [
-        { code: 'Space', label: 'ESCANEAR', hint: 'toca' },
-        { code: 'Digit1', label: 'RAYOS X', small: true },
-        { code: 'Digit2', label: 'LUPA', small: true },
-        { code: 'Digit3', label: 'JUSTUS', small: true },
-        { code: 'Digit4', label: 'BALANZA', small: true },
+        { code: 'Space', label: 'ESCANEAR', hint: 'dispara' },
+        ...HERRAMIENTAS.map((h) => ({
+          code: h.tecla, label: h.nombre, hint: h.familia, small: true,
+        })),
         { code: 'KeyE', label: 'PERITAJE', small: true },
       ],
     });
@@ -246,7 +258,7 @@ export class CentroPostalScene {
     window.removeEventListener('keyup', this._bound.keyup);
     window.removeEventListener('pointermove', this._bound.pointermove);
     window.removeEventListener('pointerdown', this._bound.pointerdown);
-    window.removeEventListener('resize', this._bound.resize);
+    this.vp?.destroy();
     gsap.killTweensOf(this.camera.position);
     for (const p of this.paquetes) gsap.killTweensOf([p.grupo.position, p.grupo.scale, p.grupo.rotation]);
     narrator.callar();
@@ -261,6 +273,7 @@ export class CentroPostalScene {
     // `_gl.deleteTexture` y se queda de verdad en la GPU (ver `Disposal`).
     this.mundo?.dispose();
     this.efectos?.dispose();
+    this.rayo?.dispose();
     this.fabrica?.dispose();
     cerrarNivel(this.renderer, { escenas: [this.scene], post: this.post, etiqueta: 'Centro Postal' });
     this.scene = null;
@@ -305,17 +318,19 @@ export class CentroPostalScene {
       if (e.button !== 0 || e.target?.id !== 'gl') return;
       this.#disparar();
     };
-    this._bound.resize = () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.post?.setSize(window.innerWidth, window.innerHeight);
-    };
     window.addEventListener('keydown', this._bound.keydown);
     window.addEventListener('keyup', this._bound.keyup);
     window.addEventListener('pointermove', this._bound.pointermove);
     window.addEventListener('pointerdown', this._bound.pointerdown);
-    window.addEventListener('resize', this._bound.resize);
+    // El tamaño del lienzo lo gobierna `Viewport` (ver su cabecera: el bug de
+    // media pantalla negra al girar el teléfono). Escuchar `resize` a secas no
+    // basta en iOS.
+    this.vp = new Viewport(this.renderer.domElement, (w, h) => {
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(w, h, false);
+      this.post?.setSize(w, h);
+    });
   }
 
   #elegirHerramienta(i) {
@@ -888,6 +903,7 @@ export class CentroPostalScene {
 
     const tick = () => {
       this._raf = requestAnimationFrame(tick);
+      this.vp?.sincronizar(); // ningún cambio de tamaño sobrevive un fotograma
       const dtReal = Math.min(this.clock.getDelta(), 0.05);
       this.perf.update();
       const dt = this.pausado ? 0 : this.hitStop.escala(dtReal);
@@ -1078,11 +1094,25 @@ export class CentroPostalScene {
   #pintarObjetivo() {
     const p = this.objetivo;
     if (!p) {
+      this.rayo?.apuntar(null, null);
       if (this.ultimoObjetivo) { this.hud.setObjetivo(null); this.ultimoObjetivo = null; }
       return;
     }
     const p0 = this.oficial.grupo.position;
     const dist = Math.hypot(p.grupo.position.x - p0.x, p.grupo.position.z - p0.z);
+
+    // El haz sale del hombro, no de los pies: si nace en el suelo parece una
+    // sombra y no un aparato que el oficial está empuñando.
+    if (this.rayo) {
+      this._desde ??= new THREE.Vector3();
+      this._hasta ??= new THREE.Vector3();
+      this._desde.set(p0.x, 1.35, p0.z);
+      this._hasta.copy(p.grupo.position);
+      this._hasta.y += p.alto * 0.5;
+      this.rayo.setColor(HERRAMIENTAS[this.herramienta].color);
+      this.rayo.apuntar(this._desde, this._hasta, this.clock.elapsedTime,
+        1 - (this.recarga > 0 ? this.recarga / RECARGA : 0));
+    }
     if (this.ultimoObjetivo !== p) {
       this.ultimoObjetivo = p;
       audio.clic();

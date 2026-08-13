@@ -10,6 +10,7 @@ import { PostFX } from '../render/PostFX.js';
 import { PauseMenu } from '../ui/PauseMenu.js';
 import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.js';
 import { disposeObject, cerrarNivel } from '../core/Disposal.js';
+import { Viewport } from '../core/Viewport.js';
 import { hornearEntorno } from '../render/Entorno.js';
 import { bus, Señal } from '../core/EventBus.js';
 import { audio } from '../audio/AudioEngine.js';
@@ -107,7 +108,8 @@ export class TrafasportRaidScene {
     const canvas = document.getElementById('gl');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias });
     this.renderer.setPixelRatio(quality.pixelRatio); // móvil ≤1.25: sin sobrecalentar
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // `false`: el tamaño CSS del lienzo lo manda la hoja de estilos (ver Viewport).
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -178,7 +180,7 @@ export class TrafasportRaidScene {
     coach.destroy();
     narrator.callar();
     audio.musica(null);
-    window.removeEventListener('resize', this._bound.resize);
+    this.vp?.destroy();
     window.removeEventListener('keydown', this._bound.keydown);
     window.removeEventListener('keyup', this._bound.keyup);
     const c = this.renderer?.domElement;
@@ -940,18 +942,20 @@ export class TrafasportRaidScene {
       this.keys[e.code] = false;
       if (e.code === 'Space') this.sniffHeld = false;
     };
-    this._bound.resize = () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
+    // El tamaño del lienzo lo gobierna `Viewport` (ver su cabecera: media
+    // pantalla en negro al girar el teléfono).
+    this.vp = new Viewport(this.renderer.domElement, (w, h) => {
+      this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.post?.setSize(window.innerWidth, window.innerHeight);
-    };
+      this.renderer.setSize(w, h, false);
+      this.post?.setSize(w, h);
+    });
     this._bound.pdown = (e) => this.#pointerDown(e);
     this._bound.pmove = (e) => this.#pointerMove(e);
     this._bound.pup = (e) => this.#pointerUp(e);
     window.addEventListener('keydown', this._bound.keydown);
     window.addEventListener('keyup', this._bound.keyup);
-    window.addEventListener('resize', this._bound.resize);
+    
     this.renderer.domElement.addEventListener('pointerdown', this._bound.pdown);
     window.addEventListener('pointermove', this._bound.pmove);
     window.addEventListener('pointerup', this._bound.pup);
@@ -1877,6 +1881,7 @@ export class TrafasportRaidScene {
   #loop() {
     const tick = () => {
       this._raf = requestAnimationFrame(tick);
+      this.vp?.sincronizar(); // ningún cambio de tamaño sobrevive un fotograma
       const dtReal = Math.min(this.clock.getDelta(), 0.05);
       this.perf.update(); // se cronometra solo con el reloj de pared
       // En pausa el mundo se congela pero se sigue renderizando.

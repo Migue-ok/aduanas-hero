@@ -13,6 +13,7 @@ import { PerfGuard, recorteRatioPixel, recorteSombras } from '../core/PerfGuard.
 import { construirPuerto } from '../world/PuertoChimbote.js';
 import { progreso } from '../core/Progreso.js';
 import { disposeObject, cerrarNivel } from '../core/Disposal.js';
+import { Viewport } from '../core/Viewport.js';
 import { hornearEntorno } from '../render/Entorno.js';
 import { audio } from '../audio/AudioEngine.js';
 import { narrator } from '../audio/Narrator.js';
@@ -114,7 +115,8 @@ export class ChimbotePortScene {
     const canvas = document.getElementById('gl');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality.antialias });
     this.renderer.setPixelRatio(quality.pixelRatio); // ≤1.25 en móvil
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // `false`: el tamaño CSS del lienzo lo manda la hoja de estilos (ver Viewport).
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; // evita que la linterna reviente
@@ -209,7 +211,7 @@ export class ChimbotePortScene {
   unmount() {
     coach.destroy();
     if (this._raf) cancelAnimationFrame(this._raf);
-    window.removeEventListener('resize', this._bound.resize);
+    this.vp?.destroy();
     window.removeEventListener('keydown', this._bound.keydown);
     window.removeEventListener('keyup', this._bound.keyup);
     document.removeEventListener('mousedown', this._bound.mousedown);
@@ -1295,16 +1297,17 @@ export class ChimbotePortScene {
       };
       window.addEventListener('pointerup', fin);
     };
-    this._bound.resize = () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.post?.setSize(window.innerWidth, window.innerHeight);
-    };
     window.addEventListener('keydown', this._bound.keydown);
     window.addEventListener('keyup', this._bound.keyup);
     document.addEventListener('mousedown', this._bound.mousedown);
-    window.addEventListener('resize', this._bound.resize);
+    // El tamaño del lienzo lo gobierna `Viewport` (ver su cabecera: media
+    // pantalla en negro al girar el teléfono).
+    this.vp = new Viewport(this.renderer.domElement, (w, h) => {
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(w, h, false);
+      this.post?.setSize(w, h);
+    });
   }
 
   #jump() {
@@ -1623,6 +1626,7 @@ export class ChimbotePortScene {
   #loop() {
     const tick = () => {
       this._raf = requestAnimationFrame(tick);
+      this.vp?.sincronizar(); // ningún cambio de tamaño sobrevive un fotograma
       // El hit-stop escala el tiempo del juego: un impacto CONGELA el mundo
       // unos ms y por eso se siente sólido (la cámara sigue sacudiéndose).
       const dtReal = Math.min(this.clock.getDelta(), 0.05);

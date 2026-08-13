@@ -29,7 +29,19 @@ export class Renderer {
     // y sombras suaves aunque fuera un teléfono. Ahora respeta el mismo techo
     // que los demás niveles.
     this.gl.setPixelRatio(quality.pixelRatio);
-    this.gl.setSize(window.innerWidth, window.innerHeight);
+    // `updateStyle = false`: que el TAMAÑO CSS del lienzo lo mande la hoja de
+    // estilos (`#gl { position: fixed; inset: 0 }`) y no Three.js.
+    //
+    // Con el valor por defecto, `setSize` escribe `style.width/height` en línea
+    // sobre el canvas y pisa ese `inset: 0`. Ahí nacía el peor bug que ha tenido
+    // el juego en móvil: si el lienzo se dimensionaba en vertical (390 px) y el
+    // jugador giraba el teléfono a apaisado (844 px), el canvas se quedaba
+    // clavado en 390 px de ancho y MEDIA PANTALLA SE VEÍA NEGRA, con el HUD
+    // encima ocupando el ancho completo. Dejando el tamaño al CSS, el lienzo
+    // cubre la pantalla pase lo que pase; lo peor que puede ocurrir mientras se
+    // corrige el buffer es un fotograma escalado, no medio juego a oscuras.
+    this.gl.setSize(window.innerWidth, window.innerHeight, false);
+    this._tam = { w: window.innerWidth, h: window.innerHeight };
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = quality.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -98,7 +110,25 @@ export class Renderer {
       }),
     ]);
 
-    window.addEventListener('resize', () => this.#resize());
+    // TRES REDES para el mismo fallo, porque en un teléfono ninguna basta sola:
+    //
+    //  1. `resize` — el evento de siempre. En iOS, al girar el aparato, llega a
+    //     veces con las medidas ANTERIORES a la rotación: por eso no se puede
+    //     confiar en él como única fuente.
+    //  2. `orientationchange` + `visualViewport` — cubren el giro y la barra de
+    //     direcciones de Safari, que cambia el alto sin disparar `resize`.
+    //  3. La comprobación por fotograma de `update()` — la red definitiva.
+    //     Cuesta dos comparaciones de enteros y atrapa cualquier cambio que se
+    //     escape a las otras dos, venga de donde venga.
+    this._onResize = () => this.#resize();
+    window.addEventListener('resize', this._onResize);
+    window.addEventListener('orientationchange', this._onResize);
+    window.visualViewport?.addEventListener('resize', this._onResize);
+    // El lienzo también avisa por su cuenta si su caja CSS cambia de tamaño.
+    if (typeof ResizeObserver !== 'undefined') {
+      this._ro = new ResizeObserver(() => this.#resize());
+      this._ro.observe(canvas);
+    }
   }
 
   /** Lo necesita `recorteRatioPixel`: el composer cachea el ratio (ver PerfGuard). */
@@ -115,16 +145,24 @@ export class Renderer {
     this.bokeh.uniforms.aperture.value = aperture;
   }
 
+  /**
+   * Ajusta el buffer al tamaño real de la ventana. Idempotente y barato: si no
+   * cambió nada, sale sin tocar la GPU. Por eso se puede llamar cada fotograma.
+   */
   #resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    if (w === this._tam.w && h === this._tam.h) return;
+    if (w === 0 || h === 0) return;   // pestaña oculta: no se redimensiona a cero
+    this._tam = { w, h };
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.gl.setSize(w, h);
+    this.gl.setSize(w, h, false);     // el CSS manda el tamaño del lienzo
     this.composer.setSize(w, h);
   }
 
   update(dt) {
+    this.#resize(); // red definitiva: ningún cambio de tamaño sobrevive un frame
     this.vigilar();
     this.cinematic.update(dt, this.tension);
     this.composer.render();

@@ -4,6 +4,11 @@ import { SceneManager } from './core/SceneManager.js';
 // import dinámico, así que el propio menú de niveles se quedaba sin la capa de
 // contraste táctil — justo la pantalla que ve primero quien juega en el móvil.
 import './core/Device.js';
+// El notch del iPhone en apaisado queda en un LATERAL y se comía la columna
+// izquierda de todos los HUD. Se aplica una vez, para el juego entero.
+import { aplicarSafeArea } from './ui/safeArea.js';
+
+aplicarSafeArea();
 
 /**
  * main — punto de entrada (ADR-006).

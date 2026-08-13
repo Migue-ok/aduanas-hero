@@ -26,8 +26,22 @@ html, body {
   overscroll-behavior: none; /* nada de "pull to refresh" a media partida */
 }
 
-/* El lienzo NUNCA hace scroll ni zoom: todo arrastre es del juego. */
-#gl { position: fixed; inset: 0; display: block; touch-action: none; }
+/* El lienzo NUNCA hace scroll ni zoom: todo arrastre es del juego.
+ *
+ * `width/height: 100%` NO es redundante con `inset: 0`, y omitirlo cuesta medio
+ * juego a oscuras. Un `<canvas>` es un elemento REEMPLAZADO: con `width: auto`
+ * resuelve su tamaño por el intrínseco —sus atributos `width`/`height`, o sea el
+ * buffer de render— en vez de estirarse al hueco. Con `pixelRatio` 1.25 el
+ * buffer mide 833 px donde la ventana mide 667, así que el lienzo se dibujaba
+ * MÁS GRANDE que la pantalla y descuadrado respecto al HUD.
+ *
+ * Antes lo tapaba el estilo en línea que escribía `setSize()`; ahora que el
+ * tamaño de presentación lo manda el CSS (ver `core/Viewport.js`), hay que
+ * declararlo aquí. */
+#gl {
+  position: fixed; inset: 0; display: block; touch-action: none;
+  width: 100%; height: 100%;
+}
 
 /* Objetivos táctiles: cualquier botón del juego cumple el mínimo de 48 px. */
 @media (pointer: coarse) {
@@ -681,17 +695,19 @@ html, body {
      firma, no un turno en curso. */
   #hud-root:has(> .sheet:not(.oculto)) > #dock { display: none; }
 
-  /* — Densidad: los paneles de consulta se pliegan con una herramienta abierta — */
-  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #ficha {
-    max-height: 56px; padding: 8px 10px; opacity: 0.82;
-  }
+  /* ── UN PANEL A LA VEZ ────────────────────────────────────────────────
+     La regla del puesto en móvil: con una herramienta abierta se ve LA
+     HERRAMIENTA, lo que dice el pasajero y el dock. Nada más.
+
+     Antes convivían siete capas en 375 px de alto —barra, marcador, ficha,
+     expediente, cinta de diálogo, el panel de turno y el dock— y ninguna se
+     podía leer entera. Ficha y expediente son paneles de CONSULTA: su sitio es
+     el puesto en reposo, no compitiendo con la acción. Se recuperan al cerrar
+     la herramienta, que es cuando vuelven a hacer falta. */
+  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #ficha,
   #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #expediente {
-    max-height: 74px; padding: 8px 10px; opacity: 0.82;
+    display: none;
   }
-  /* Documentos y rayos X ya ocupan la pantalla entera: la ficha detrás solo
-     estorba, y el jugador tiene el pasaporte físico delante. */
-  #hud-root:has(> #documentos:not(.oculto)) > #ficha,
-  #hud-root:has(> #xray-controls:not(.oculto)) > #ficha { display: none; }
 }
 
 /* ── Móvil apaisado: 375 px de alto para la libreta, el diálogo y el dock ───
@@ -701,15 +717,6 @@ html, body {
    la lista de cinco filas a tres. La respuesta del pasajero se coloca encima
    midiendo la libreta (ver `HUD.ajustarDialogo`). */
 @media (max-height: 460px) and (pointer: coarse) {
-  /* Apaisado deja sitio para CUATRO capas, no para siete: barra, respuesta del
-     pasajero, la herramienta y el dock. Los dos paneles de consulta se retiran
-     del todo mientras hay una herramienta abierta —a un toque de volver— en
-     lugar de encogerse hasta ser ilegibles. */
-  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #ficha,
-  #hud-root:has(> .panel:not(.oculto):is(#interrogatorio, #documentos, #xray-controls, #decision, #corporal)) > #expediente {
-    display: none;
-  }
-
   /* LA LIBRETA SE PARTE EN DOS. Las cuatro tácticas y la salida son acciones
      que tienen que estar SIEMPRE a mano; las preguntas son una lista que puede
      crecer. Con todo en un mismo scroll, PRESIONAR · CALMAR · SILENCIO caían

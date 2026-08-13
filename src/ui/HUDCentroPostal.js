@@ -165,7 +165,11 @@ export class HUDCentroPostal {
         b.addEventListener('click', () => this.cb.onHerramienta(Number(b.dataset.i)));
       });
     } else {
-      this.$hotbar.classList.add('cp-hotbar--indicador');
+      // En táctil la hotbar SOBRA: las cuatro herramientas ya están, con su
+      // familia debajo, en los botones del mando que sí se pulsan. Tenerlas
+      // además arriba a la izquierda obligaba a mirar a un sitio para entender
+      // y tocar en otro, y ocupaba la columna que el notch ya estrecha.
+      this.$hotbar.classList.add('cp-hotbar--indicador', 'cp-hotbar--oculta');
     }
     this.setHerramienta(0);
   }
@@ -848,6 +852,7 @@ export class HUDCentroPostal {
         width: var(--recarga, 100%); background: var(--tono, #e0952a); opacity: .9;
       }
       .cp-hotbar--indicador .cp-slot { pointer-events: none; }
+      .cp-hotbar--oculta { display: none; }
 
       /* Rótulo de la herramienta recién empuñada, justo encima de la hotbar. */
       .cp-tip {
@@ -1133,10 +1138,18 @@ export class HUDCentroPostal {
       @S .cp-slot-ico { font-size: 14px; }
       @S .cp-slot-name { font-size: 6.5px; letter-spacing: .04em; }
       @S .cp-slot-fam { font-size: 7.5px; }
-      @S .cp-tip { bottom: auto; top: 112px; left: 8px; transform: none; padding: 4px 10px; font-size: 9px; }
+      @S .cp-tip { bottom: auto; top: 108px; left: 8px; transform: none; padding: 4px 10px; font-size: 9px; }
       @S .cp-tip.on { transform: none; }
-      @S .cp-accesos { top: 140px; }
-      @S .cp-ficha { top: 190px; }
+
+      /* ── LA COLUMNA IZQUIERDA, RECOLOCADA ─────────────────────────────
+         Al retirarse la hotbar en tactil queda libre su franja, y la ficha del
+         bulto sube a ocuparla. Estaba a 190 px y el JOYSTICK —que arranca hacia
+         los 225 px en un movil apaisado— le tapaba media ficha: justamente los
+         datos con los que se decide si el envio cuadra o no.
+         Orden de arriba abajo: integridad · accesos · ficha, y el mando debajo
+         sin pisar nada. */
+      @S .cp-accesos { top: 62px; }
+      @S .cp-ficha { top: 118px; max-height: calc(100vh - 250px); overflow-y: auto; }
       @S .cp-slot-n { font-size: 7px; top: 1px; left: 4px; }
       @S .cp-slot.on { transform: translateY(-2px); }
       @S .cp-brief { font-size: 12.5px; }

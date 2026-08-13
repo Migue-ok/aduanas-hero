@@ -184,6 +184,23 @@ export class TouchControls {
       #touch-pad { position: fixed; inset: 0; z-index: 60; pointer-events: none;
         font-family: 'Courier New', monospace; touch-action: none; }
       #touch-pad > * { pointer-events: auto; }
+
+      /* ── EL MANDO SE RETIRA CON CUALQUIER HOJA ABIERTA ──────────────────
+         El mando vive en z-index 60 y los HUD de nivel en 42: con un briefing o
+         un peritaje delante, el joystick y los cinco botones seguían flotando
+         ENCIMA del panel, tapando el propio boton que hay que pulsar para
+         cerrarlo. Se ve en cualquier captura del Nivel 4: ESCANEAR, RAYOS X y
+         PERITAJE dibujados sobre la hoja de briefing.
+         Va por CSS y no por JS a proposito: asi ninguna escena tiene que
+         acordarse de esconderlo, que es justo de lo que se olvidaban las tres. */
+      body:has(.cp-velo:not(.hidden)) #touch-pad,
+      body:has(.cp-peritaje:not(.hidden)) #touch-pad,
+      body:has(.cp-panel:not(.hidden)) #touch-pad,
+      body:has(.cp-fallo:not(.hidden)) #touch-pad,
+      body:has(#hoja.sheet:not(.oculto)) #touch-pad,
+      body:has(#title-screen:not(.hidden)) #touch-pad,
+      body:has(#level-menu:not(.hidden)) #touch-pad,
+      body:has(#pause-root .pz-overlay:not(.hidden)) #touch-pad { display: none; }
       .tp-stick {
         position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom));
         width: 132px; height: 132px; border-radius: 50%;
