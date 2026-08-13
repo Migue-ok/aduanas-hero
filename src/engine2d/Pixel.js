@@ -35,9 +35,11 @@ export function px(g, x, y, w, h, color) {
  * cambiar la hora del día sea cambiar este objeto y nada más.
  */
 export const PAL = {
-  // Suelo del patio
-  asfalto: '#3b4453',
-  asfaltoOscuro: '#333b48',
+  // Suelo del patio. Sube un punto respecto al primer corte: con las farolas
+  // repartidas, un asfalto más oscuro dejaba el patio en penumbra plana y los
+  // bultos flotando sobre nada.
+  asfalto: '#464f5f',
+  asfaltoOscuro: '#3e4655',
   linea: '#c9a227',
   // Almacén
   suelo: '#4a4640',

@@ -72,38 +72,76 @@ const CARGAS = ['Repuestos de moto', 'Textil confeccionado', 'Cerámica decorati
 /**
  * El MAPA. Se lee como se ve (ver `TileMap`):
  *   . asfalto · | línea pintada · # nave · , suelo de almacén
- *   = muelle · ~ agua · O farola · T caseta
+ *   = muelle · ~ agua · O farola · T caseta · G pata de grúa
+ *   + verja · v vía de camiones · o oficina
  *
- * Diseño del recinto, y por qué: un patio ancho al centro donde se corre y se
- * usa el dash, la nave a la izquierda para que haya interior y exterior, el
- * muelle al norte contra el agua (da fondo y encierra el mapa sin paredes
- * invisibles) y la caseta al sureste como punto de referencia.
+ * ── El recinto y por qué está así repartido ────────────────────────────────
+ * 64×44 tiles: más del triple que el patio de la primera versión, porque con el
+ * dash el mapa pequeño se cruzaba en cuatro segundos y el cronómetro dejaba de
+ * apretar. Cinco zonas con carácter propio, para que uno sepa DÓNDE está sin
+ * mirar un minimapa:
+ *
+ *   · **Muelle** (norte, contra el agua) — grúas y descarga. Es el fondo del
+ *     escenario y encierra el mapa sin paredes invisibles.
+ *   · **Explanada** (centro) — el patio abierto donde se corre. Aquí el dash es
+ *     la diferencia entre llegar y no llegar.
+ *   · **Nave** (oeste) — interior, con su suelo propio. Refugio y referencia.
+ *   · **Vía de camiones** (este) — por donde se van los que no revisas.
+ *   · **Oficina y verja** (sur) — el borde administrativo. Por la verja escapan
+ *     los contrabandistas, así que mirar al sur es mirar al peligro.
  */
 export const MAPA = [
-  '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
-  '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
-  '======================================',
-  '.....................................#',
-  '.O.........|.........|.........|.....#',
-  '.....................................#',
-  '###########..........................#',
-  '#,,,,,,,,,#..........................#',
-  '#,,,,,,,,,#....|.........|.........|.#',
-  '#,,,,,,,,,,..........................#',
-  '#,,,,,,,,,#..........................#',
-  '#,,,,,,,,,#.........O.........O......#',
-  '###########..........................#',
-  '.....................................#',
-  '.....|.........|.........|...........#',
-  '.....................................#',
-  '.............................TTT.....#',
-  '.............................TTT.....#',
-  '.....................................#',
-  '######################################',
+  '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  '================================================================',
+  '..G..........G..........G..........G..........G..........G......',
+  '................................................................',
+  '.....|..........|..........|..........|..........|..........|...',
+  '................................................................',
+  '#############...................................................',
+  '#,,,,,,,,,,,#..........O..........O..........O..........O.......',
+  '#,,,,,,,,,,,#...................................................',
+  '#,,,,,,,,,,,,...................................................',
+  '#,,,,,,,,,,,#.....|..........|..........|..........|..........|.',
+  '#,,,,,,,,,,,#...................................................',
+  '#,,,,,,,,,,,,...................................................',
+  '#,,,,,,,,,,,#...................................................',
+  '#############...................................................',
+  '................................................................',
+  '..........|..........|..........|..........|..........|.........',
+  '................................................................',
+  '.......................................................vvvvvvvvv',
+  '.......................................................vvvvvvvvv',
+  '.......................................................vvvvvvvvv',
+  '................................................................',
+  '.....|..........|..........|..........|..........|..............',
+  '................................................................',
+  '..........O..........O..........O..........O..........O.........',
+  '................................................................',
+  '################........................########################',
+  '#,,,,,,,,,,,,,,#........................#,,,,,,,,,,,,,,,,,,,,,,#',
+  '#,,,,,,,,,,,,,,,........................,,,,,,,,,,,,,,,,,,,,,,,#',
+  '#,,,,,,,,,,,,,,#........................#,,,,,,,,,,,,,,,,,,,,,,#',
+  '################........................########################',
+  '................................................................',
+  '......|..........|..........|..........|..........|.............',
+  '................................................................',
+  '..........................ooo...................................',
+  '..........................ooo...................................',
+  '................................................................',
+  '.....O..........O..........O..........O..........O..........O...',
+  '................................................................',
+  '++++++++++++++++++++++++++++..++++++++++++++++++++++++++++++++++',
+  '................................................................',
+  '................................................................',
 ];
 
-/** Punto de aparición del oficial, en tiles. */
-export const INICIO = { cx: 18, cy: 14 };
+/** Punto de aparición del oficial, en tiles. Centro de la explanada. */
+export const INICIO = { cx: 30, cy: 24 };
+
+/** Por dónde se escapan los que huyen: el hueco de la verja del sur. */
+export const FUGA = { cx: 29, cy: 42 };
 
 /**
  * Genera los bultos de una ronda.
@@ -115,11 +153,13 @@ export const INICIO = { cx: 18, cy: 14 };
  */
 export function generarRonda(n = 9, rnd = Math.random) {
   const sitios = [];
-  for (let cy = 3; cy < 19; cy += 1) {
-    for (let cx = 1; cx < 37; cx += 1) {
-      const t = MAPA[cy][cx];
-      const dentroNave = cx < 11 && cy > 5 && cy < 13;
-      if (t === '.' && !dentroNave) sitios.push({ cx, cy });
+  for (let cy = 4; cy < MAPA.length - 3; cy += 1) {
+    for (let cx = 1; cx < MAPA[cy].length - 1; cx += 1) {
+      if (MAPA[cy][cx] !== '.') continue;
+      // Separación mínima: bultos pegados se tapan entre sí y el escáner los
+      // revelaría todos de un pulso, que es justo la decisión que se quiere.
+      if (sitios.some((s) => Math.abs(s.cx - cx) < 3 && Math.abs(s.cy - cy) < 3)) continue;
+      sitios.push({ cx, cy });
     }
   }
   // Barajado con la fuente de azar que se le pase (así una semilla lo hace fijo).
@@ -130,18 +170,23 @@ export function generarRonda(n = 9, rnd = Math.random) {
 
   const bultos = [];
   const sospechosos = Math.max(3, Math.round(n * 0.45));
-  for (let i = 0; i < n; i += 1) {
-    const s = sitios[i * 3 % sitios.length] ?? sitios[i];
+  for (let i = 0; i < n && i < sitios.length; i += 1) {
+    const s = sitios[i];
     const sucio = i < sospechosos;
     bultos.push({
       id: `B${i}`,
       cx: s.cx,
       cy: s.cy,
-      color: i % 6,
+      color: Math.floor(rnd() * 6),
+      tipo: TIPOS_BULTO[Math.floor(rnd() * TIPOS_BULTO.length)],
       guia: `CT-${1000 + Math.floor(rnd() * 8999)}`,
       origen: ORIGENES[Math.floor(rnd() * ORIGENES.length)],
       carga: CARGAS[Math.floor(rnd() * CARGAS.length)],
       anomalia: sucio ? ANOMALIAS[Math.floor(rnd() * ANOMALIAS.length)] : null,
+      // Uno de cada tres sospechosos trae quien lo vigile. No todos: si siempre
+      // hubiera alguien al lado, el fugitivo sería el delator y sobraría el
+      // escáner. Así la persecución es una sorpresa, no un sistema de aviso.
+      vigilado: sucio && rnd() < 0.34,
       revelado: false,
       marcado: false,
     });
@@ -154,8 +199,11 @@ export function generarRonda(n = 9, rnd = Math.random) {
   return bultos;
 }
 
-/** Duración de la ronda. Regla de Oro #4: sesión móvil corta. */
-export const DURACION = 95;
+/** Las cinco siluetas de bulto. Ver `engine2d/Bultos.js`. */
+export const TIPOS_BULTO = ['contenedor', 'contenedor', 'pale', 'bidones', 'sacos', 'huacal'];
+
+/** Duración de la ronda. Sube con el patio grande: hay mucho más que recorrer. */
+export const DURACION = 130;
 /** Alcance del pulso de escaneo, en tiles. */
 export const RADIO_ESCANER = 4.2;
 /** Segundos de recarga del escáner. */

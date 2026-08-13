@@ -19,7 +19,7 @@ import { lienzo, px, PAL, TILE } from './Pixel.js';
  */
 
 /** Los tiles que bloquean el paso. */
-const SOLIDOS = new Set(['#', 'O', '~', '=']);
+const SOLIDOS = new Set(['#', 'O', '~', '=', 'G', '+', 'o']);
 
 export class TileMap {
   /** @param {string[]} filas  plantilla de texto, una cadena por fila */
@@ -97,6 +97,30 @@ export class TileMap {
         } else if (t === '|') {
           px(g, x, y, TILE, TILE, alt ? PAL.asfalto : PAL.asfaltoOscuro);
           px(g, x + 6, y, 4, TILE, PAL.linea);          // línea pintada del patio
+        } else if (t === 'G') {
+          // Pata de grúa pórtico: el hito que orienta el norte del recinto.
+          px(g, x, y, TILE, TILE, alt ? PAL.asfalto : PAL.asfaltoOscuro);
+          px(g, x + 2, y, 12, TILE, '#59616e');
+          px(g, x + 2, y, 12, 3, '#7b8593');
+          px(g, x + 4, y + 5, 3, 3, '#d8c46a');         // baliza
+          px(g, x + 9, y + 5, 3, 3, '#d8c46a');
+        } else if (t === 'v') {
+          // Vía de camiones: asfalto oscuro con marcas de rodada.
+          px(g, x, y, TILE, TILE, '#2c333d');
+          px(g, x, y + 3, TILE, 2, '#39424e');
+          px(g, x, y + 11, TILE, 2, '#39424e');
+        } else if (t === '+') {
+          // Verja del recinto. Por su hueco escapan los que huyen.
+          px(g, x, y, TILE, TILE, alt ? PAL.asfalto : PAL.asfaltoOscuro);
+          px(g, x, y + 4, TILE, 8, '#4a525f');
+          for (let i = 0; i < TILE; i += 3) px(g, x + i, y + 2, 1, 12, '#6a7381');
+          px(g, x, y + 2, TILE, 2, '#7b8593');
+        } else if (t === 'o') {
+          // Oficina de la aduana: ladrillo claro y ventana iluminada.
+          px(g, x, y, TILE, TILE, '#7a6a58');
+          px(g, x, y, TILE, 4, '#8d7c67');
+          px(g, x + 3, y + 6, 10, 7, '#ffd98a');
+          px(g, x + 7, y + 6, 2, 7, '#8d7c67');
         } else {
           px(g, x, y, TILE, TILE, alt ? PAL.asfalto : PAL.asfaltoOscuro);
         }

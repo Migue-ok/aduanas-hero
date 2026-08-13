@@ -10,10 +10,13 @@ import { audio } from '../audio/AudioEngine.js';
 import { coach } from '../ui/JustusCoach.js';
 import { TileMap } from '../engine2d/TileMap.js';
 import { Actor2D } from '../engine2d/Actor2D.js';
+import { Fugitivo } from '../engine2d/Fugitivo.js';
+import { Ambiente } from '../engine2d/Ambiente.js';
+import { dibujarBulto } from '../engine2d/Bultos.js';
 import { PAL, TILE } from '../engine2d/Pixel.js';
 import { HUDRonda } from '../ui/HUDRonda.js';
 import {
-  MAPA, INICIO, generarRonda, DURACION, RADIO_ESCANER, RECARGA_ESCANER, RECARGA_DASH,
+  MAPA, INICIO, FUGA, generarRonda, DURACION, RADIO_ESCANER, RECARGA_ESCANER, RECARGA_DASH,
 } from '../gameplay/rondaPatio.js';
 
 /**
@@ -57,6 +60,8 @@ const VALOR_RONDA = {
   marcaInfundada: -150,
   bultoEscapado: -220,
   rondaLimpia: 500,
+  fugitivoAtrapado: 320,
+  fugitivoEscapado: -180,
 };
 
 export class RondaPatioScene {
@@ -85,7 +90,17 @@ export class RondaPatioScene {
     this.g.imageSmoothingEnabled = false;
 
     this.mapa = new TileMap(MAPA);
-    this.bultos = generarRonda(12);
+    this.bultos = generarRonda(20);
+    this.ambiente = new Ambiente(this.mapa);
+    // Un vigilante por cada bulto marcado como vigilado, plantado a su lado.
+    this.fugitivos = this.bultos.filter((b) => b.vigilado).map((b, i) => {
+      const f = new Fugitivo(b, i);
+      f.x = (b.cx + 0.5) * TILE;
+      f.y = (b.cy + 1.8) * TILE;
+      return f;
+    });
+    this.estela = [];
+    this.polvo = [];
     this.actor = new Actor2D();
     this.actor.x = (INICIO.cx + 0.5) * TILE;
     this.actor.y = (INICIO.cy + 0.9) * TILE;
@@ -246,13 +261,32 @@ export class RondaPatioScene {
     if (this.#pendientes() === 0) this.#cerrar('Patio despejado');
   }
 
-  /** Dash: el impulso que hace que el patio quepa en el cronómetro. */
+  /**
+   * Dash: el impulso que hace que el patio quepa en el cronómetro — y el único
+   * modo de alcanzar a quien sale corriendo.
+   *
+   * Lo que se ve al soltarlo: una nube de polvo en el punto de arranque, un
+   * rastro de imágenes fantasma del propio sprite mientras dura, y un tirón de
+   * cámara. Sin nada de eso el dash era un cambio de número en una variable; con
+   * ello se SIENTE, que es la diferencia entre un recurso y un botón.
+   */
   #dash() {
     if (this.fase !== 'ronda' || this.pausado || this.dashCd > 0) return;
     this.dashCd = RECARGA_DASH;
     this.dashT = DASH_DUR;
     this.actor.dash = 1;
     audio.paso?.();
+    // Polvo: se queda donde arrancaste, así que marca de dónde vienes.
+    for (let i = 0; i < 9; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      this.polvo.push({
+        x: this.actor.x + Math.cos(a) * 3,
+        y: this.actor.y - 2 + Math.sin(a) * 2,
+        vx: Math.cos(a) * 22, vy: Math.sin(a) * 11,
+        r: 1.6 + Math.random() * 1.8, vida: 0.45 + Math.random() * 0.25,
+      });
+    }
+    this.sacudida = 0.16;
   }
 
   #pendientes() {
@@ -364,6 +398,44 @@ export class RondaPatioScene {
     this.pulsos = this.pulsos.filter((p) => p.vida > 0);
     for (const a of this.avisos) { a.vida -= dt; a.y -= dt * 14; }
     this.avisos = this.avisos.filter((a) => a.vida > 0);
+
+    // ── Estela del dash: fotogramas fantasma del sprite ──
+    if (this.dashT > 0) {
+      this.estela.push({ x: this.actor.x, y: this.actor.y, dir: this.actor.dir,
+        ciclo: Math.floor(this.actor.t) % 4, vida: 0.3 });
+    }
+    for (const e of this.estela) e.vida -= dt;
+    this.estela = this.estela.filter((e) => e.vida > 0);
+
+    for (const p of this.polvo) {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.9; p.vy *= 0.9; p.vida -= dt;
+    }
+    this.polvo = this.polvo.filter((p) => p.vida > 0);
+    this.sacudida = Math.max(0, (this.sacudida ?? 0) - dt);
+
+    // ── Fugitivos ──
+    for (const f of this.fugitivos) {
+      if (f.estado === 'escapado' || f.estado === 'atrapado') continue;
+      const r = f.update(dt, this.mapa, this.actor, FUGA, TILE);
+      if (r === 'escapa') {
+        puntaje.sumar(VALOR_RONDA.fugitivoEscapado, 'SE ESCAPÓ POR LA VERJA',
+          { detalle: 'Quien vigila un bulto sabe lo que lleva dentro. Ese testimonio se fue.' });
+        this.#aviso(f.x, f.y, '✖', PAL.mal);
+        continue;
+      }
+      // Alcanzarlo es TOCARLO: nada de violencia (Visión §22).
+      if (f.estado === 'huye' && Math.hypot(f.x - this.actor.x, f.y - this.actor.y) < 13) {
+        f.atrapar();
+        this.aciertos += 1;
+        puntaje.sumar(VALOR_RONDA.fugitivoAtrapado, 'INTERCEPTADO EN LA HUIDA',
+          { detalle: `Vigilaba la guía ${f.bulto.guia}. Su bulto queda revelado en el acto.` });
+        this.#aviso(f.x, f.y, '✔', PAL.ok);
+        audio.golpeSello?.();
+        this.hud.setPendientes(this.#pendientes());
+        this.sacudida = 0.2;
+      }
+    }
   }
 
   // ── Dibujo ────────────────────────────────────────────────────────────────
@@ -384,25 +456,51 @@ export class RondaPatioScene {
     camY = Math.max(0, Math.min(this.mapa.hpx - vistaH, camY));
     if (this.mapa.wpx < vistaW) camX = (this.mapa.wpx - vistaW) / 2;
     if (this.mapa.hpx < vistaH) camY = (this.mapa.hpx - vistaH) / 2;
+    // Sacudida del dash y de las intercepciones. Breve y pequeña: lo justo para
+    // que el impulso golpee, no tanto como para marear en una pantalla pequeña.
+    if (this.sacudida > 0) {
+      camX += (Math.random() - 0.5) * this.sacudida * 26;
+      camY += (Math.random() - 0.5) * this.sacudida * 26;
+    }
 
+    const t = performance.now() / 1000;
     g.save();
     g.scale(esc, esc);
     g.translate(-Math.round(camX * esc) / esc, -Math.round(camY * esc) / esc);
 
     // Suelo: una sola estampa del lienzo del mapa ya pintado.
     g.drawImage(this.mapa.lienzo, 0, 0);
+    this.ambiente.dibujarFondo(g, t);
+    this.ambiente.dibujarSuelo(g, t);
 
-    // Bultos, ordenados por Y para que los de delante tapen a los de detrás —
-    // el truco de profundidad de toda la vida en vista cenital.
-    const orden = [...this.bultos].sort((a, b) => a.cy - b.cy);
-    for (const b of orden) this.#dibujarBulto(g, b);
+    // Polvo del dash: va pegado al suelo, debajo de todo lo que camina.
+    for (const p of this.polvo) {
+      g.globalAlpha = Math.max(0, p.vida) * 0.5;
+      g.fillStyle = '#cfc9b8';
+      g.beginPath();
+      g.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalAlpha = 1;
 
-    // El oficial entra en el mismo orden de profundidad.
-    g.restore();
-    g.save();
-    g.scale(esc, esc);
-    g.translate(-Math.round(camX * esc) / esc, -Math.round(camY * esc) / esc);
-    this.actor.dibujar(g, 1);
+    // Estela del dash: el propio sprite repetido y desvaneciéndose.
+    for (const e of this.estela) {
+      g.globalAlpha = Math.max(0, e.vida) * 1.5;
+      const img = this.actor.frames[e.dir][e.ciclo];
+      g.drawImage(img, Math.round(e.x - 8), Math.round(e.y - 24));
+    }
+    g.globalAlpha = 1;
+
+    // ── TODO LO QUE PISA EL SUELO, ORDENADO POR Y ──
+    // Bultos, fugitivos y oficial se ordenan juntos: es lo que hace que un
+    // fugitivo pase POR DETRÁS de un contenedor y no flotando sobre él.
+    const cosas = [
+      ...this.bultos.map((b) => ({ y: (b.cy + 1) * TILE, pinta: () => this.#dibujarBulto(g, b) })),
+      ...this.fugitivos.filter((f) => f.estado !== 'escapado')
+        .map((f) => ({ y: f.y, pinta: () => f.dibujar(g) })),
+      { y: this.actor.y, pinta: () => this.actor.dibujar(g, 1) },
+    ].sort((a, b) => a.y - b.y);
+    for (const c of cosas) c.pinta();
 
     // Ondas del escáner: anillos que se expanden.
     for (const p of this.pulsos) {
@@ -427,25 +525,19 @@ export class RondaPatioScene {
       g.fillText(a.txt, a.x, a.y - 18);
       g.globalAlpha = 1;
     }
+
+    // Charcos de luz de las farolas, al final y en aditivo: convierten el patio
+    // plano en un sitio con zonas cálidas y zonas donde no se ve nada.
+    this.ambiente.dibujarLuces(g, this.mapa, camX, camY, vistaW, vistaH);
     g.restore();
   }
 
   #dibujarBulto(g, b) {
     const x = b.cx * TILE;
     const y = b.cy * TILE;
-    const col = PAL.cont[b.color % PAL.cont.length];
 
-    // Sombra proyectada: los apoya en el suelo.
-    g.fillStyle = PAL.contSombra;
-    g.fillRect(x + 1, y + 11, 15, 4);
-
-    // Cuerpo del contenedor, con corrugado y canto superior claro.
-    g.fillStyle = col;
-    g.fillRect(x + 1, y + 2, 14, 11);
-    g.fillStyle = 'rgba(255,255,255,0.16)';
-    g.fillRect(x + 1, y + 2, 14, 2);
-    g.fillStyle = 'rgba(0,0,0,0.18)';
-    for (let i = 3; i < 14; i += 3) g.fillRect(x + i, y + 4, 1, 9);
+    // La silueta la pone `Bultos.js`: contenedor, palé, bidones, sacos o huacal.
+    dibujarBulto(g, b, x, y);
 
     if (b.marcado) {
       // Precinto de intervención: cinta cruzada. Se ve a distancia de mapa.
