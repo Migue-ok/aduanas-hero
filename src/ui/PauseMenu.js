@@ -102,7 +102,7 @@ export class PauseMenu {
       .pz-open {
         position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%;
         transform: translateX(-50%);
-        min-width: 48px; min-height: 40px; padding: 8px 14px; cursor: pointer;
+        min-width: 48px; min-height: 44px; padding: 10px 14px; cursor: pointer;
         background: var(--g-bg, rgba(13,19,28,.62)); color: #eef4f8;
         -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
         border: 1px solid rgba(148,176,208,.18); border-radius: 999px;

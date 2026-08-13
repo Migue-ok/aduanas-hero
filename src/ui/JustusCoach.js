@@ -253,6 +253,11 @@ body:has(.cp-peritaje:not(.hidden)) #jc-pata,
 body:has(.cp-velo:not(.hidden)) #jc-pata,
 body:has(.cp-fallo:not(.hidden)) #jc-pata,
 body:has(.cp-panel:not(.hidden)) #jc-pata,
+body:has([data-velo]:not(.hidden)) #jc-pata,
+/* Y con el mando virtual en pantalla, tampoco: la esquina inferior derecha es
+   de los botones de accion, y una pata flotante encima solo es un boton mas que
+   pulsar sin querer. En movil Justus ya aparece solo cuando el nivel lo pide. */
+body:has(#touch-pad) #jc-pata,
 body:has(#hoja.sheet:not(.oculto)) #jc-pata,
 /* Ni en la portada ni en el menu: son pantallas de entrada, no partida. La pata
    se queda del nivel anterior y aparece flotando sobre el titulo. */

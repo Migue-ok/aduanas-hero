@@ -45,6 +45,7 @@ export class SceneManager {
       { id: 'chimbote', n: 2, icono: '🚢', nombre: 'Puerto', verbo: 'Recorre el muelle', tono: '#4fd0e0' },
       { id: 'trafasport', n: 3, icono: '🚔', nombre: 'Operativo', verbo: 'Historia narrada', tono: '#e04a3c' },
       { id: 'centropostal', n: 4, icono: '📦', nombre: 'Centro Postal', verbo: 'Contrarreloj', tono: '#3fc47f' },
+      { id: 'rondapatio', n: 5, icono: '🛰', nombre: 'Ronda de Patio', verbo: 'Mapa 2D · dash', tono: '#4fd0e0' },
     ];
     const menu = document.createElement('div');
     menu.id = 'level-menu';
@@ -138,6 +139,14 @@ export class SceneManager {
       if (this.hudRoot) this.hudRoot.innerHTML = '';
       const mod = await import('../scenes/CentroPostalScene.js');
       this.current = new mod.CentroPostalScene({
+        onExit: () => { this.cerrarActual(); window.location.reload(); },
+      });
+      this.current.mount();
+    } else if (levelId === 'rondapatio') {
+      this.titleScreen?.classList.add('hidden');
+      if (this.hudRoot) this.hudRoot.innerHTML = '';
+      const mod = await import('../scenes/RondaPatioScene.js');
+      this.current = new mod.RondaPatioScene({
         onExit: () => { this.cerrarActual(); window.location.reload(); },
       });
       this.current.mount();

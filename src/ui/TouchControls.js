@@ -197,10 +197,15 @@ export class TouchControls {
       body:has(.cp-peritaje:not(.hidden)) #touch-pad,
       body:has(.cp-panel:not(.hidden)) #touch-pad,
       body:has(.cp-fallo:not(.hidden)) #touch-pad,
+      body:has(.rp-velo:not(.hidden)) #touch-pad,
       body:has(#hoja.sheet:not(.oculto)) #touch-pad,
       body:has(#title-screen:not(.hidden)) #touch-pad,
       body:has(#level-menu:not(.hidden)) #touch-pad,
-      body:has(#pause-root .pz-overlay:not(.hidden)) #touch-pad { display: none; }
+      body:has(#pause-root .pz-overlay:not(.hidden)) #touch-pad,
+      /* Y una red generica para los niveles que vengan: cualquier contenedor que
+         se declare VELO se lleva el mando por delante sin tener que apuntarse
+         aqui. Lo de arriba se conserva para los HUD que ya existian. */
+      body:has([data-velo]:not(.hidden)) #touch-pad { display: none; }
       .tp-stick {
         position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom));
         width: 132px; height: 132px; border-radius: 50%;
